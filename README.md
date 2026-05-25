@@ -1,56 +1,124 @@
 # Markhub
 
-Markhub 现在按前后端分离结构组织：
+[中文文档](README.zh-CN.md)
 
-- `frontend/`：React/Vite 前端页面，来自 `markhub-annotation-dashboard`。
-- `backend/`：Python PDF 版面分析服务，包含模型调用、任务记录、旧版静态预览页和本地配置。
-- `.tools/`：工程辅助资料和本地开发工具。
+Markhub is a local document layout annotation and analysis workspace. It helps turn PDF documents into reviewable layout data by rendering pages, sending them to an OpenAI-compatible vision model, normalizing the model output, and presenting detected blocks in an interactive annotation UI.
 
-## 目录结构
+The current product focuses on PDF layout analysis: upload a PDF, choose a prompt template and model endpoint, run analysis, then inspect pages, bounding boxes, block types, JSON payloads, and generated dataset records.
 
-```text
-Markhub/
-  frontend/   # 前端应用
-  backend/    # 后端服务
-  .tools/     # 开发辅助文件
-```
+## What It Does
 
-## 一键启动
+- Analyzes PDF page layouts with a Qwen/OpenAI-compatible vision model.
+- Renders PDF pages locally and maps model `0-1000` grounding coordinates back to preview-image pixels.
+- Displays detected blocks such as document titles, paragraph titles, text, tables, figures, images, and footnotes.
+- Lets users review, filter, delete, draw, and export annotation blocks.
+- Stores local analysis jobs as reusable dataset records.
+- Provides prompt-template editing for layout analysis and future annotation types.
+
+## Product Areas
+
+- **Dashboard**: shows real backend analysis jobs as annotation projects.
+- **Datasets**: summarizes completed and running PDF layout datasets.
+- **Workspace**: uploads PDFs, configures model settings, runs analysis, and reviews page-level annotations.
+- **Settings**: manages Chinese UI preferences and prompt templates.
+
+## Tech Stack
+
+- **Frontend**: React 19, Vite, TypeScript, Tailwind CSS 4, Motion, Lucide icons.
+- **Frontend server**: Express dev server with `/api` and `/jobs` proxying.
+- **Backend**: Python HTTP server, PyMuPDF, Pillow, OpenAI Python SDK.
+- **Runtime storage**: local files under `backend/jobs/` for generated page images and result JSON.
+
+## Quick Start
+
+From the project root:
 
 ```bash
 ./start.sh
 ```
 
-脚本会同时启动后端和前端：
+Open:
 
-- 后端：`http://127.0.0.1:8787`
-- 前端：`http://127.0.0.1:3000`
-
-如果前后端已经在运行，脚本会自动复用已有服务，不会再次占用同一个端口。
-
-按 `Ctrl+C` 会同时停止两个服务。
-
-如需自定义端口或 Python 路径：
-
-```bash
-BACKEND_PORT=8788 PORT=3001 PYTHON_BIN=/path/to/python ./start.sh
+```text
+http://127.0.0.1:3000
 ```
 
-## 单独启动后端
+The launcher starts both services:
+
+- Frontend: `http://127.0.0.1:3000`
+- Backend: `http://127.0.0.1:8787`
+
+Use restart mode after backend changes:
 
 ```bash
-cd backend
-python server.py --port 8787
+./start.sh restart
 ```
 
-后端说明见 `backend/README.md`。
+## Configuration
 
-## 单独启动前端
+Backend model and rendering settings can be provided through `backend/.env` or the workspace UI.
+
+Useful variables:
 
 ```bash
-cd frontend
-npm install
-npm run dev
+LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+LLM_API_KEY=
+LLM_MODEL=
+LLM_TIMEOUT=180
+LAYOUT_RENDER_DPI=180
+LAYOUT_MAX_PAGES=50
+QWEN_RESIZE_PRESET=default
+QWEN_RESIZED_WIDTH=1536
+QWEN_RESIZED_HEIGHT=2176
 ```
 
-前端说明见 `frontend/README.md`。
+Do not commit real `.env` files or API keys. Use `backend/.env.example` as the template.
+
+## Common Commands
+
+| Command | Description |
+| --- | --- |
+| `./start.sh` | Start backend and frontend together. |
+| `./start.sh restart` | Stop existing Markhub listeners and start fresh services. |
+| `cd frontend && npm run lint` | Run TypeScript checking. |
+| `cd frontend && npm run build` | Build the frontend and server bundle. |
+| `PYTHONPYCACHEPREFIX=/private/tmp/markhub_pycache python3 -m py_compile backend/server.py` | Check backend Python syntax without writing cache files into the repo. |
+
+## Architecture
+
+```text
+Markhub/
+  backend/
+    server.py              # API routes, PDF rendering, model calls, job storage
+    static/index.html      # legacy standalone preview UI
+    jobs/                  # generated runtime results, ignored by Git
+  frontend/
+    server.ts              # Express/Vite server and backend proxy
+    src/App.tsx            # app shell, dashboard routing, settings
+    src/components/        # dashboard, datasets page, workspace UI
+    src/types.ts           # shared frontend types
+  start.sh                 # one-command local launcher
+```
+
+The frontend does not use React Router yet. Top-level view state is managed in `frontend/src/App.tsx`, and the annotation workflow lives mainly in `frontend/src/components/Workspace.tsx`.
+
+## API Overview
+
+The Python backend exposes a small local API:
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/config` | Runtime config and prompt templates. |
+| `GET` | `/api/prompt-templates` | Prompt template list. |
+| `POST` | `/api/prompt-templates/{id}` | Update an existing prompt template. |
+| `POST` | `/api/analyze` | Upload a PDF and start analysis. |
+| `GET` | `/api/jobs` | List analysis jobs. |
+| `GET` | `/api/jobs/{job_id}/result` | Read a full job result. |
+| `DELETE` | `/api/jobs/{job_id}` | Delete a local job. |
+| `GET` | `/jobs/...` | Serve generated page images and assets. |
+
+## Current Status
+
+Layout analysis is the active annotation workflow. Bounding box, polygon, keypoints, and text transcription entry points are present as future categories, but they are not implemented as full workflows yet.
+
+For handoff notes and known caveats, see `AGENT_HANDOFF.md`.
