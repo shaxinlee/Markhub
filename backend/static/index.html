@@ -1,0 +1,1140 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PDF 版面分析预览</title>
+  <style>
+    :root {
+      --bg: #f6f7f9;
+      --panel: #ffffff;
+      --panel-2: #eef3f1;
+      --text: #17201d;
+      --muted: #66736d;
+      --border: #d8dfdc;
+      --accent: #116a5b;
+      --accent-2: #e8b44f;
+      --danger: #b42318;
+      --shadow: 0 10px 24px rgba(22, 32, 29, 0.08);
+      --radius: 8px;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    button, input, select {
+      font: inherit;
+    }
+
+    .app {
+      min-height: 100vh;
+      display: grid;
+      grid-template-columns: 360px minmax(0, 1fr);
+    }
+
+    .sidebar {
+      height: 100vh;
+      position: sticky;
+      top: 0;
+      overflow: auto;
+      background: var(--panel);
+      border-right: 1px solid var(--border);
+      padding: 18px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+
+    .brand h1 {
+      font-size: 18px;
+      line-height: 1.2;
+      margin: 0;
+      font-weight: 760;
+    }
+
+    .status-pill {
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      color: var(--muted);
+      padding: 4px 9px;
+      font-size: 12px;
+      white-space: nowrap;
+      background: #fafafa;
+    }
+
+    .section {
+      border-top: 1px solid var(--border);
+      padding-top: 16px;
+      margin-top: 16px;
+    }
+
+    .section:first-of-type {
+      border-top: 0;
+      padding-top: 0;
+      margin-top: 0;
+    }
+
+    .section h2 {
+      margin: 0 0 10px;
+      font-size: 13px;
+      color: var(--muted);
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0;
+    }
+
+    .dropzone {
+      display: grid;
+      place-items: center;
+      min-height: 142px;
+      padding: 18px;
+      border: 1.5px dashed #aab7b2;
+      border-radius: var(--radius);
+      background: var(--panel-2);
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.15s ease, background 0.15s ease;
+    }
+
+    .dropzone:hover,
+    .dropzone.dragover {
+      border-color: var(--accent);
+      background: #e5f0ec;
+    }
+
+    .dropzone strong {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 15px;
+    }
+
+    .dropzone span {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .file-name {
+      margin-top: 10px;
+      color: var(--muted);
+      overflow-wrap: anywhere;
+    }
+
+    .field-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .field {
+      display: grid;
+      gap: 6px;
+    }
+
+    .field label {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 650;
+    }
+
+    .field input {
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: #fff;
+      padding: 8px 9px;
+      color: var(--text);
+    }
+
+    .field select {
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: #fff;
+      padding: 8px 9px;
+      color: var(--text);
+    }
+
+    .primary {
+      width: 100%;
+      margin-top: 12px;
+      border: 0;
+      border-radius: 6px;
+      padding: 10px 12px;
+      background: var(--accent);
+      color: white;
+      font-weight: 760;
+      cursor: pointer;
+    }
+
+    .primary:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
+    }
+
+    .meta {
+      display: grid;
+      gap: 7px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .meta code {
+      color: var(--text);
+      background: #f1f4f3;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      padding: 1px 5px;
+      overflow-wrap: anywhere;
+    }
+
+    .filters {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 5px 9px;
+      background: #fff;
+      user-select: none;
+      cursor: pointer;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .chip input {
+      margin: 0;
+      accent-color: var(--accent);
+    }
+
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+    }
+
+    .metric {
+      background: #f5f7f6;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 9px;
+    }
+
+    .metric b {
+      display: block;
+      font-size: 19px;
+    }
+
+    .metric span {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .model-line {
+      margin-top: 10px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: #f7faf8;
+      padding: 9px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .model-line code {
+      display: block;
+      margin-top: 3px;
+      color: var(--text);
+      background: transparent;
+      overflow-wrap: anywhere;
+    }
+
+    .block-list {
+      display: grid;
+      gap: 7px;
+      max-height: 360px;
+      overflow: auto;
+      padding-right: 3px;
+    }
+
+    .block-item {
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      padding: 8px;
+      background: #fff;
+      cursor: pointer;
+    }
+
+    .block-item.active {
+      outline: 2px solid var(--accent);
+      border-color: transparent;
+    }
+
+    .block-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 4px;
+    }
+
+    .type-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--text);
+      font-weight: 720;
+      font-size: 12px;
+    }
+
+    .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+
+    .block-id {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .block-text {
+      color: var(--muted);
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      word-break: break-word;
+    }
+
+    .job-list {
+      display: grid;
+      gap: 8px;
+      max-height: 300px;
+      overflow: auto;
+      padding-right: 3px;
+    }
+
+    .job-item {
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      background: #fff;
+      color: var(--text);
+      padding: 9px;
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .job-item.active {
+      outline: 2px solid var(--accent);
+      border-color: transparent;
+    }
+
+    .job-name {
+      font-weight: 720;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .job-meta {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
+
+    .job-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .delete-job {
+      flex: 0 0 auto;
+      border: 1px solid #f1c9c5;
+      border-radius: 6px;
+      background: #fff7f6;
+      color: var(--danger);
+      padding: 3px 7px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    .delete-job:hover {
+      background: #ffeceb;
+    }
+
+    .content {
+      min-width: 0;
+      padding: 22px;
+    }
+
+    .toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+
+    .toolbar h2 {
+      margin: 0;
+      font-size: 20px;
+      line-height: 1.25;
+    }
+
+    .toolbar-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .tool-btn {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: #fff;
+      color: var(--text);
+      padding: 8px 10px;
+      cursor: pointer;
+    }
+
+    .viewer {
+      display: grid;
+      gap: 22px;
+      align-items: start;
+    }
+
+    .page {
+      width: min(100%, 1180px);
+      margin: 0 auto;
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .page-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 9px 12px;
+      border-bottom: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 12px;
+      background: #fbfcfb;
+    }
+
+    .page-stage {
+      position: relative;
+      line-height: 0;
+      background: #f1f2f1;
+    }
+
+    .page-stage img {
+      width: 100%;
+      height: auto;
+      display: block;
+      user-select: none;
+    }
+
+    .overlay {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+    }
+
+    .box {
+      position: absolute;
+      border: 2px solid currentColor;
+      background: color-mix(in srgb, currentColor 9%, transparent);
+      pointer-events: auto;
+      cursor: pointer;
+    }
+
+    .box.active {
+      border-width: 3px;
+      background: color-mix(in srgb, currentColor 16%, transparent);
+      z-index: 5;
+    }
+
+    .box-label {
+      position: absolute;
+      left: -2px;
+      top: -24px;
+      min-height: 20px;
+      max-width: min(260px, 75vw);
+      background: transparent;
+      color: currentColor;
+      border-radius: 0;
+      padding: 0;
+      font-size: 12px;
+      line-height: 16px;
+      font-weight: 750;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      text-shadow: 0 1px 1px #fff, 1px 0 1px #fff, 0 -1px 1px #fff, -1px 0 1px #fff;
+    }
+
+    .empty {
+      min-height: calc(100vh - 44px);
+      display: grid;
+      place-items: center;
+      color: var(--muted);
+      text-align: center;
+    }
+
+    .empty-inner {
+      max-width: 430px;
+      padding: 28px;
+    }
+
+    .empty-inner h2 {
+      color: var(--text);
+      font-size: 22px;
+      margin: 0 0 8px;
+    }
+
+    .notice {
+      border-radius: var(--radius);
+      border: 1px solid #f1c9c5;
+      background: #fff7f6;
+      color: var(--danger);
+      padding: 10px;
+      margin-top: 10px;
+      white-space: pre-wrap;
+    }
+
+    .json-panel {
+      display: none;
+      margin-top: 14px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: #0f1714;
+      color: #d7ede4;
+      padding: 12px;
+      overflow: auto;
+      max-height: 420px;
+      font-size: 12px;
+    }
+
+    .json-panel.open {
+      display: block;
+    }
+
+    @media (max-width: 920px) {
+      .app {
+        grid-template-columns: 1fr;
+      }
+      .sidebar {
+        height: auto;
+        position: relative;
+        border-right: 0;
+        border-bottom: 1px solid var(--border);
+      }
+      .content {
+        padding: 14px;
+      }
+      .toolbar {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <h1>PDF 版面分析</h1>
+        <span class="status-pill" id="modelState">未连接</span>
+      </div>
+
+      <section class="section">
+        <label class="dropzone" id="dropzone">
+          <input id="fileInput" type="file" accept="application/pdf,.pdf" hidden />
+          <span>
+            <strong>选择或拖入 PDF</strong>
+            <span>上传后会渲染页面并调用视觉大模型</span>
+          </span>
+        </label>
+        <div class="file-name" id="fileName">尚未选择文件</div>
+        <div class="field-grid" style="margin-top: 12px;">
+          <div class="field">
+            <label for="dpiInput">渲染 DPI</label>
+            <input id="dpiInput" type="number" min="72" max="300" value="180" />
+          </div>
+          <div class="field">
+            <label for="pageInput">最大页数</label>
+            <input id="pageInput" type="number" min="1" max="200" value="50" />
+          </div>
+        </div>
+        <div class="field" style="margin-top: 10px;">
+          <label for="promptTemplateInput">提示词模板</label>
+          <select id="promptTemplateInput">
+            <option value="default_template_1">默认模板 1</option>
+          </select>
+        </div>
+        <button class="primary" id="analyzeBtn" disabled>开始分析</button>
+        <div class="notice" id="errorBox" style="display: none;"></div>
+      </section>
+
+      <section class="section">
+        <h2>模型配置</h2>
+        <div class="field" style="margin-bottom: 10px;">
+          <label for="baseUrlInput">Base URL</label>
+          <input id="baseUrlInput" type="text" placeholder="http://localhost:5222/v1" autocomplete="off" />
+        </div>
+        <div class="field" style="margin-bottom: 10px;">
+          <label for="modelInput">Model</label>
+          <input id="modelInput" type="text" placeholder="/data/sdnu/Qwen2.5-VL-72B-Instruct-AWQ" autocomplete="off" />
+        </div>
+        <div class="field-grid">
+          <div class="field">
+            <label for="apiKeyInput">API Key</label>
+            <input id="apiKeyInput" type="password" placeholder="本地服务可留空" autocomplete="off" />
+          </div>
+          <div class="field">
+            <label for="timeoutInput">超时秒数</label>
+            <input id="timeoutInput" type="number" min="10" max="900" value="180" />
+          </div>
+        </div>
+        <div class="field" style="margin-top: 10px;">
+          <label for="qwenPresetInput">Qwen 检查图尺寸</label>
+          <select id="qwenPresetInput">
+            <option value="speed">速度优先 · 1216 × 1728</option>
+            <option value="default" selected>推荐默认 · 1536 × 2176</option>
+            <option value="high">高精度 · 2048 × 2912</option>
+            <option value="custom">自定义</option>
+          </select>
+        </div>
+        <div class="field-grid" id="customSizeGrid" style="margin-top: 10px; display: none;">
+          <div class="field">
+            <label for="qwenWidthInput">宽度</label>
+            <input id="qwenWidthInput" type="number" min="1024" max="4096" step="32" value="1536" />
+          </div>
+          <div class="field">
+            <label for="qwenHeightInput">高度</label>
+            <input id="qwenHeightInput" type="number" min="1024" max="6144" step="32" value="2176" />
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="resultSection" style="display: none;">
+        <h2>识别概览</h2>
+        <div class="summary">
+          <div class="metric"><b id="pageCount">0</b><span>页面</span></div>
+          <div class="metric"><b id="blockCount">0</b><span>版面块</span></div>
+          <div class="metric"><b id="errorCount">0</b><span>异常页</span></div>
+        </div>
+        <div class="model-line">
+          分析模型
+          <code id="currentModelName">未知</code>
+        </div>
+        <div class="model-line">
+          提示词模板
+          <code id="currentPromptTemplateName">默认模板 1</code>
+        </div>
+      </section>
+
+      <section class="section" id="historySection">
+        <h2>已分析文件</h2>
+        <div class="job-list" id="jobList">
+          <div class="meta">正在读取历史记录</div>
+        </div>
+      </section>
+
+      <section class="section" id="filterSection" style="display: none;">
+        <h2>类型筛选</h2>
+        <div class="filters" id="filters"></div>
+      </section>
+
+      <section class="section" id="blockSection" style="display: none;">
+        <h2>版面块</h2>
+        <div class="block-list" id="blockList"></div>
+      </section>
+    </aside>
+
+    <section class="content">
+      <div class="toolbar">
+        <h2 id="viewerTitle">预览</h2>
+        <div class="toolbar-actions">
+          <button class="tool-btn" id="fitBtn" title="回到页面顶部">定位顶部</button>
+          <button class="tool-btn" id="jsonBtn" title="显示或隐藏 JSON">JSON</button>
+        </div>
+      </div>
+      <pre class="json-panel" id="jsonPanel"></pre>
+      <div class="viewer" id="viewer">
+        <div class="empty">
+          <div class="empty-inner">
+            <h2>上传 PDF 后在这里预览</h2>
+            <p>页面会以图片显示，模型返回的 0-1000 bbox 会映射后叠加到对应页面上。</p>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const TYPES = [
+      "doc_title",
+      "paragraph_title",
+      "text",
+      "table",
+      "figure_title",
+      "image",
+      "vision_footnote"
+    ];
+    const COLORS = {
+      doc_title: "#b45f06",
+      paragraph_title: "#0066b3",
+      text: "#138a72",
+      table: "#238823",
+      figure_title: "#8a5a00",
+      image: "#7a3db8",
+      vision_footnote: "#b3261e"
+    };
+
+    const state = {
+      file: null,
+      data: null,
+      activeId: null,
+      visibleTypes: new Set(TYPES),
+      pollTimer: null,
+      jobs: [],
+      promptTemplates: []
+    };
+
+    const el = (id) => document.getElementById(id);
+
+    async function loadConfig() {
+      try {
+        const res = await fetch("/api/config");
+        const payload = await res.json();
+        const cfg = payload.config || {};
+        el("baseUrlInput").value = cfg.base_url || "";
+        el("modelInput").value = cfg.model || "";
+        el("apiKeyInput").placeholder = cfg.has_api_key === "true" ? "已从环境变量读取，可覆盖" : "本地服务可留空";
+        el("dpiInput").value = cfg.render_dpi || "180";
+        el("pageInput").value = cfg.max_pages || "50";
+        el("qwenPresetInput").value = cfg.qwen_preset || "default";
+        el("qwenWidthInput").value = cfg.qwen_width || "1536";
+        el("qwenHeightInput").value = cfg.qwen_height || "2176";
+        state.promptTemplates = payload.prompt_templates || [{ id: "default_template_1", name: "默认模板 1" }];
+        renderPromptTemplates(cfg.prompt_template_id || "default_template_1");
+        updateCustomSizeVisibility();
+        el("modelState").textContent = cfg.has_api_key === "true" ? "已配置" : "本地模式";
+      } catch (err) {
+        el("modelState").textContent = "配置读取失败";
+      }
+    }
+
+    function renderPromptTemplates(selectedId) {
+      const templates = state.promptTemplates.length ? state.promptTemplates : [{ id: "default_template_1", name: "默认模板 1" }];
+      el("promptTemplateInput").innerHTML = templates.map((template) => `
+        <option value="${escapeHtml(template.id)}" ${template.id === selectedId ? "selected" : ""}>${escapeHtml(template.name)}</option>
+      `).join("");
+    }
+
+    function setFile(file) {
+      state.file = file;
+      el("fileName").textContent = file ? `${file.name} (${formatBytes(file.size)})` : "尚未选择文件";
+      el("analyzeBtn").disabled = !file;
+      hideError();
+    }
+
+    function formatBytes(bytes) {
+      if (!bytes) return "0 B";
+      const units = ["B", "KB", "MB", "GB"];
+      const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+      return `${(bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+    }
+
+    function showError(message) {
+      el("errorBox").style.display = "block";
+      el("errorBox").textContent = message;
+    }
+
+    function hideError() {
+      el("errorBox").style.display = "none";
+      el("errorBox").textContent = "";
+    }
+
+    async function analyze() {
+      if (!state.file) return;
+      stopPolling();
+      hideError();
+      el("analyzeBtn").disabled = true;
+      el("analyzeBtn").textContent = "分析中...";
+      el("viewerTitle").textContent = "正在调用模型";
+      el("viewer").innerHTML = `<div class="empty"><div class="empty-inner"><h2>正在渲染 PDF</h2><p>页面出来后会逐页显示识别结果。</p></div></div>`;
+
+      try {
+        const form = new FormData();
+        form.append("file", state.file);
+        form.append("dpi", el("dpiInput").value || "180");
+        form.append("max_pages", el("pageInput").value || "50");
+        form.append("base_url", el("baseUrlInput").value.trim());
+        form.append("model", el("modelInput").value.trim());
+        form.append("api_key", el("apiKeyInput").value.trim());
+        form.append("timeout", el("timeoutInput").value || "180");
+        form.append("qwen_preset", el("qwenPresetInput").value || "default");
+        form.append("qwen_width", el("qwenWidthInput").value || "1536");
+        form.append("qwen_height", el("qwenHeightInput").value || "2176");
+        form.append("prompt_template_id", el("promptTemplateInput").value || "default_template_1");
+
+        const res = await fetch("/api/analyze", { method: "POST", body: form });
+        const payload = await res.json();
+        if (!res.ok || payload.error) throw new Error(payload.error || `HTTP ${res.status}`);
+        state.data = payload;
+        state.activeId = null;
+        renderAll();
+        loadAnalyzedFiles();
+        startPolling(payload.job_id);
+      } catch (err) {
+        showError(err.message || String(err));
+        el("viewerTitle").textContent = "预览";
+        el("viewer").innerHTML = `<div class="empty"><div class="empty-inner"><h2>分析失败</h2><p>请检查后端日志、模型服务和环境变量配置。</p></div></div>`;
+      } finally {
+        el("analyzeBtn").disabled = !state.file;
+        el("analyzeBtn").textContent = "开始分析";
+      }
+    }
+
+    function startPolling(jobId) {
+      if (!jobId) return;
+      stopPolling();
+      state.pollTimer = window.setInterval(async () => {
+        try {
+          const res = await fetch(`/api/jobs/${jobId}/result`, { cache: "no-store" });
+          const payload = await res.json();
+          if (!res.ok || payload.error) throw new Error(payload.error || `HTTP ${res.status}`);
+          state.data = payload;
+          renderAll();
+          if (payload.status === "complete") {
+            stopPolling();
+            loadAnalyzedFiles();
+          }
+        } catch (err) {
+          stopPolling();
+          showError(err.message || String(err));
+        }
+      }, 1200);
+    }
+
+    function stopPolling() {
+      if (state.pollTimer) {
+        window.clearInterval(state.pollTimer);
+        state.pollTimer = null;
+      }
+    }
+
+    function updateCustomSizeVisibility() {
+      el("customSizeGrid").style.display = el("qwenPresetInput").value === "custom" ? "grid" : "none";
+    }
+
+    function renderAll() {
+      renderFilters();
+      renderSummary();
+      renderPages();
+      renderBlockList();
+      renderJson();
+      renderAnalyzedFiles();
+      el("resultSection").style.display = "block";
+      el("filterSection").style.display = "block";
+      el("blockSection").style.display = "block";
+      el("viewerTitle").textContent = state.data?.filename || "预览";
+    }
+
+    function allBlocks() {
+      return state.data?.result?.blocks || [];
+    }
+
+    function visibleBlocks() {
+      return allBlocks().filter((block) => state.visibleTypes.has(block.block_type));
+    }
+
+    function renderSummary() {
+      el("pageCount").textContent = state.data?.page_count || 0;
+      el("blockCount").textContent = allBlocks().length;
+      el("errorCount").textContent = state.data?.errors?.length || 0;
+      el("currentModelName").textContent = modelName(state.data);
+      el("currentPromptTemplateName").textContent = promptTemplateName(state.data);
+    }
+
+    async function loadAnalyzedFiles() {
+      try {
+        const res = await fetch("/api/jobs", { cache: "no-store" });
+        const payload = await res.json();
+        if (!res.ok || payload.error) throw new Error(payload.error || `HTTP ${res.status}`);
+        state.jobs = payload.jobs || [];
+        renderAnalyzedFiles();
+      } catch (err) {
+        el("jobList").innerHTML = `<div class="meta">历史记录读取失败</div>`;
+      }
+    }
+
+    function renderAnalyzedFiles() {
+      const list = el("jobList");
+      if (!list) return;
+      if (!state.jobs.length) {
+        list.innerHTML = `<div class="meta">暂无已分析文件</div>`;
+        return;
+      }
+      const activeJobId = state.data?.job_id;
+      list.innerHTML = state.jobs.map((job) => `
+        <button class="job-item ${job.job_id === activeJobId ? "active" : ""}" data-job-id="${escapeHtml(job.job_id)}">
+          <div class="job-head">
+            <div class="job-name">${escapeHtml(job.filename || "未知文件")}</div>
+            <span class="delete-job" data-job-id="${escapeHtml(job.job_id)}">删除</span>
+          </div>
+          <div class="job-meta">模型：${escapeHtml(job.model || "未知")}</div>
+          <div class="job-meta">模板：${escapeHtml(job.prompt_template?.name || "默认模板 1")}</div>
+          <div class="job-meta">${escapeHtml(statusText(job.status))} · ${job.completed_pages || 0}/${job.page_count || 0} 页 · ${job.block_count || 0} 块</div>
+        </button>
+      `).join("");
+      list.querySelectorAll(".job-item").forEach((item) => {
+        item.addEventListener("click", () => loadJob(item.dataset.jobId));
+      });
+      list.querySelectorAll(".delete-job").forEach((item) => {
+        item.addEventListener("click", (event) => {
+          event.stopPropagation();
+          deleteJob(item.dataset.jobId);
+        });
+      });
+    }
+
+    async function loadJob(jobId) {
+      if (!jobId) return;
+      stopPolling();
+      hideError();
+      try {
+        const res = await fetch(`/api/jobs/${jobId}/result`, { cache: "no-store" });
+        const payload = await res.json();
+        if (!res.ok || payload.error) throw new Error(payload.error || `HTTP ${res.status}`);
+        state.data = payload;
+        state.activeId = null;
+        renderAll();
+        if (payload.status !== "complete") {
+          startPolling(payload.job_id);
+        }
+      } catch (err) {
+        showError(err.message || String(err));
+      }
+    }
+
+    async function deleteJob(jobId) {
+      if (!jobId) return;
+      const job = state.jobs.find((item) => item.job_id === jobId);
+      const name = job?.filename || jobId;
+      if (!window.confirm(`删除历史处理结果：${name}？`)) return;
+      try {
+        const res = await fetch(`/api/jobs/${jobId}`, { method: "DELETE" });
+        const payload = await res.json();
+        if (!res.ok || payload.error) throw new Error(payload.error || `HTTP ${res.status}`);
+        if (state.data?.job_id === jobId) {
+          stopPolling();
+          state.data = null;
+          state.activeId = null;
+          resetViewer();
+        }
+        await loadAnalyzedFiles();
+      } catch (err) {
+        showError(err.message || String(err));
+      }
+    }
+
+    function resetViewer() {
+      el("viewerTitle").textContent = "预览";
+      el("resultSection").style.display = "none";
+      el("filterSection").style.display = "none";
+      el("blockSection").style.display = "none";
+      el("jsonPanel").textContent = "";
+      el("viewer").innerHTML = `<div class="empty"><div class="empty-inner"><h2>上传 PDF 后在这里预览</h2><p>页面会以图片显示，模型返回的 0-1000 bbox 会映射后叠加到对应页面上。</p></div></div>`;
+    }
+
+    function renderFilters() {
+      const counts = Object.fromEntries(TYPES.map((type) => [type, 0]));
+      allBlocks().forEach((block) => counts[block.block_type] = (counts[block.block_type] || 0) + 1);
+      el("filters").innerHTML = TYPES.map((type) => `
+        <label class="chip" style="color:${COLORS[type]}">
+          <input type="checkbox" data-type="${type}" ${state.visibleTypes.has(type) ? "checked" : ""} />
+          ${type} (${counts[type] || 0})
+        </label>
+      `).join("");
+      el("filters").querySelectorAll("input").forEach((input) => {
+        input.addEventListener("change", () => {
+          if (input.checked) state.visibleTypes.add(input.dataset.type);
+          else state.visibleTypes.delete(input.dataset.type);
+          renderPages();
+          renderBlockList();
+        });
+      });
+    }
+
+    function renderPages() {
+      const pages = state.data?.pages || [];
+      if (!pages.length) {
+        el("viewer").innerHTML = `<div class="empty"><div class="empty-inner"><h2>没有可展示页面</h2></div></div>`;
+        return;
+      }
+
+      el("viewer").innerHTML = pages.map((page) => {
+        const blocks = (page.blocks || []).filter((block) => state.visibleTypes.has(block.block_type));
+        const boxes = blocks.map((block) => renderBox(block, page)).join("");
+        const pageStatus = page.error
+          ? `<span style="color: var(--danger);">${escapeHtml(page.error)}</span>`
+          : `<span>${statusText(page.status)} · ${blocks.length} 个可见块</span>`;
+        return `
+          <article class="page" id="page-${page.page_id}">
+            <div class="page-title">
+              <span>第 ${page.page_id + 1} 页 · ${page.width} × ${page.height}px</span>
+              ${pageStatus}
+            </div>
+            <div class="page-stage">
+              <img src="${page.image_url}" alt="第 ${page.page_id + 1} 页" />
+              <div class="overlay">${boxes}</div>
+            </div>
+          </article>
+        `;
+      }).join("");
+
+      document.querySelectorAll(".box").forEach((box) => {
+        box.addEventListener("click", () => selectBlock(box.dataset.id, true));
+      });
+    }
+
+    function renderBox(block, page) {
+      const [x1, y1, x2, y2] = block.bbox;
+      const left = x1 / page.width * 100;
+      const top = y1 / page.height * 100;
+      const width = (x2 - x1) / page.width * 100;
+      const height = (y2 - y1) / page.height * 100;
+      const active = state.activeId === block.id ? " active" : "";
+      const label = blockLabel(block);
+      const title = `${label} ${block.id}`;
+      return `
+        <div class="box${active}" data-id="${block.id}" title="${escapeHtml(title)}"
+          style="left:${left}%;top:${top}%;width:${width}%;height:${height}%;color:${COLORS[block.block_type] || "#116a5b"}">
+          <span class="box-label">${escapeHtml(label)} · ${escapeHtml(block.id)}</span>
+        </div>
+      `;
+    }
+
+    function renderBlockList() {
+      const blocks = visibleBlocks();
+      if (!blocks.length) {
+        el("blockList").innerHTML = `<div class="meta">没有匹配当前筛选的版面块</div>`;
+        return;
+      }
+      el("blockList").innerHTML = blocks.map((block) => `
+        <div class="block-item ${state.activeId === block.id ? "active" : ""}" data-id="${block.id}">
+          <div class="block-head">
+            <span class="type-tag" style="color:${COLORS[block.block_type] || "#116a5b"}"><span class="dot"></span>${escapeHtml(blockLabel(block))}</span>
+            <span class="block-id">${escapeHtml(block.id)}</span>
+          </div>
+          <div class="block-text">${escapeHtml(block.text || bboxText(block.bbox))}</div>
+        </div>
+      `).join("");
+      el("blockList").querySelectorAll(".block-item").forEach((item) => {
+        item.addEventListener("click", () => selectBlock(item.dataset.id, true));
+      });
+    }
+
+    function selectBlock(id, scroll) {
+      state.activeId = id;
+      renderPages();
+      renderBlockList();
+      if (scroll) {
+        const block = allBlocks().find((item) => item.id === id);
+        const pageEl = block ? document.getElementById(`page-${block.page_id}`) : null;
+        pageEl?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    }
+
+    function renderJson() {
+      el("jsonPanel").textContent = JSON.stringify(state.data?.result || {}, null, 2);
+    }
+
+    function statusText(status) {
+      if (status === "complete") return "已完成";
+      if (status === "running") return "分析中";
+      if (status === "done") return "已完成";
+      if (status === "processing") return "识别中";
+      if (status === "error") return "失败";
+      return "等待中";
+    }
+
+    function blockLabel(block) {
+      if ((block.block_type === "doc_title" || block.block_type === "paragraph_title") && block.level) {
+        return `${block.level} · ${block.block_type}`;
+      }
+      return block.block_type || "unknown";
+    }
+
+    function modelName(data) {
+      return data?.config?.model || data?.model || data?.model_name || "未知";
+    }
+
+    function promptTemplateName(data) {
+      return data?.prompt_template?.name || "默认模板 1";
+    }
+
+    function bboxText(bbox) {
+      return bbox ? `[${bbox.join(", ")}]` : "";
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    el("fileInput").addEventListener("change", (event) => setFile(event.target.files[0]));
+    el("analyzeBtn").addEventListener("click", analyze);
+    el("jsonBtn").addEventListener("click", () => el("jsonPanel").classList.toggle("open"));
+    el("fitBtn").addEventListener("click", () => window.scrollTo({ top: 0, behavior: "smooth" }));
+    el("qwenPresetInput").addEventListener("change", updateCustomSizeVisibility);
+
+    const dropzone = el("dropzone");
+    dropzone.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      dropzone.classList.add("dragover");
+    });
+    dropzone.addEventListener("dragleave", () => dropzone.classList.remove("dragover"));
+    dropzone.addEventListener("drop", (event) => {
+      event.preventDefault();
+      dropzone.classList.remove("dragover");
+      const file = event.dataTransfer.files[0];
+      if (file) setFile(file);
+    });
+
+    loadConfig();
+    loadAnalyzedFiles();
+  </script>
+</body>
+</html>

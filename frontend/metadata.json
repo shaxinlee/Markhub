@@ -1,0 +1,6 @@
+{
+  "name": "MarkHub Annotation Dashboard",
+  "description": "Precision AI data annotation pipeline and layout analysis workspace.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

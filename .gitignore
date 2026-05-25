@@ -1,0 +1,32 @@
+.DS_Store
+
+# Local environment
+.env
+.env.*
+!.env.example
+backend/.env
+backend/.env.*
+!backend/.env.example
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+
+# Backend runtime artifacts
+backend/jobs/
+backend/__pycache__/
+__pycache__/
+*.py[cod]
+.Python
+.venv/
+venv/
+env/
+
+# Frontend dependencies and build output
+frontend/node_modules/
+frontend/dist/
+frontend/build/
+frontend/coverage/
+frontend/*.log
+
+# Local project tools
+.tools/
