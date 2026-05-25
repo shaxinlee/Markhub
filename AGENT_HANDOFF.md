@@ -6,7 +6,7 @@ This document is for the next agent or engineer taking over Markhub. It summariz
 
 ## Project Overview
 
-Markhub is a local document layout annotation and analysis tool. The current implementation is a React/Vite frontend backed by a Python HTTP server. The main supported workflow is PDF layout analysis using a Qwen/OpenAI-compatible vision model, then reviewing and editing detected layout blocks in the annotation workspace.
+Markhub is a local data annotation platform. The current implementation is a React/Vite frontend backed by a Python HTTP server. The only completed annotation workflow today is PDF document layout analysis using a Qwen/OpenAI-compatible vision model, then reviewing and editing detected layout blocks in the annotation workspace.
 
 The product UI currently has three important areas:
 
@@ -21,8 +21,15 @@ Markhub/
   start.sh                     # one-command launcher; supports ./start.sh restart
   AGENT_HANDOFF.md             # this handoff document
   README.md
+  docs/
+    BACKEND_FEATURE_STANDARD.md # backend feature-module rules for future annotation capabilities
   backend/
-    server.py                  # Python backend, API routes, PDF rendering, LLM calls
+    server.py                  # thin Python backend entrypoint
+    features/
+      __init__.py
+      layout_analysis/
+        __init__.py
+        server.py              # layout-analysis API routes, PDF rendering, LLM calls
     requirements.txt
     .env                       # local model/API/runtime config; do not commit secrets
     .env.example
@@ -83,7 +90,7 @@ npm run build
 Backend syntax check:
 
 ```bash
-PYTHONPYCACHEPREFIX=/private/tmp/markhub_pycache python3 -m py_compile backend/server.py
+PYTHONPYCACHEPREFIX=/private/tmp/markhub_pycache python3 -m py_compile backend/server.py backend/features/layout_analysis/server.py
 ```
 
 Backend health/config:
@@ -95,7 +102,7 @@ curl -s http://127.0.0.1:8787/api/jobs
 
 ## Backend API Surface
 
-Implemented in `backend/server.py`, mostly inside `LayoutAnalyzerHandler`.
+Implemented in `backend/features/layout_analysis/server.py`, mostly inside `LayoutAnalyzerHandler`. `backend/server.py` is now only the process entrypoint.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
@@ -159,7 +166,7 @@ Prompt templates are categorized by annotation feature. Current categories are:
 - `keypoints`
 - `text_transcription`
 
-The existing `默认模板 1` belongs to `layout`. It is defined in `backend/server.py` and can be edited in Settings. Saving writes `backend/prompt_templates.json`, which is loaded at backend startup.
+The existing `默认模板 1` belongs to `layout`. It is defined in `backend/features/layout_analysis/server.py` and can be edited in Settings. Saving writes `backend/prompt_templates.json`, which is loaded at backend startup.
 
 Frontend types live in `frontend/src/types.ts`:
 
@@ -187,6 +194,7 @@ When adding UI:
 ## Important Implementation Notes
 
 - `frontend/server.ts` proxies `/api` and `/jobs` to `MARKHUB_BACKEND_URL`.
+- Backend feature code is organized under `backend/features/{feature_name}/`; future annotation services should follow `docs/BACKEND_FEATURE_STANDARD.md`.
 - Backend stores generated job data under `backend/jobs/{model_dir}/{job_id}`.
 - Legacy jobs may be directly under `backend/jobs/{job_id}`; backend has compatibility lookup logic.
 - `backend/.env` may contain API credentials. Do not print or commit secrets.
@@ -209,4 +217,3 @@ If continuing development, likely next steps are:
 - `prompt_templates.json` is runtime-generated. If absent, the backend falls back to the built-in `默认模板 1` layout prompt.
 - The prompt editor currently allows editing existing templates only. New template creation is intentionally not implemented yet.
 - Some UI text remains English because the original prototype and dashboard used English copy. The app-level language is `zh-CN`, but not every label has been translated.
-

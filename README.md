@@ -2,24 +2,26 @@
 
 [中文文档](README.zh-CN.md)
 
-Markhub is a local document layout annotation and analysis workspace. It helps turn PDF documents into reviewable layout data by rendering pages, sending them to an OpenAI-compatible vision model, normalizing the model output, and presenting detected blocks in an interactive annotation UI.
+Markhub is a local data annotation platform for building and reviewing structured datasets for multimodal and computer-vision workflows. It is designed to support multiple annotation modes over time, including document layout analysis, bounding boxes, polygon segmentation, keypoints, and text transcription.
 
-The current product focuses on PDF layout analysis: upload a PDF, choose a prompt template and model endpoint, run analysis, then inspect pages, bounding boxes, block types, JSON payloads, and generated dataset records.
+The current implementation has completed the document layout analysis annotation workflow. Users can upload a PDF, choose a prompt template and model endpoint, run analysis, then inspect pages, bounding boxes, block types, JSON payloads, and generated dataset records.
 
 ## What It Does
 
+- Provides a dashboard and dataset view for annotation projects.
+- Supports the completed PDF layout analysis annotation workflow.
 - Analyzes PDF page layouts with a Qwen/OpenAI-compatible vision model.
 - Renders PDF pages locally and maps model `0-1000` grounding coordinates back to preview-image pixels.
-- Displays detected blocks such as document titles, paragraph titles, text, tables, figures, images, and footnotes.
+- Displays detected layout blocks such as document titles, paragraph titles, text, tables, figures, images, and footnotes.
 - Lets users review, filter, delete, draw, and export annotation blocks.
-- Stores local analysis jobs as reusable dataset records.
+- Stores local annotation jobs as reusable dataset records.
 - Provides prompt-template editing for layout analysis and future annotation types.
 
 ## Product Areas
 
-- **Dashboard**: shows real backend analysis jobs as annotation projects.
-- **Datasets**: summarizes completed and running PDF layout datasets.
-- **Workspace**: uploads PDFs, configures model settings, runs analysis, and reviews page-level annotations.
+- **Dashboard**: shows real annotation jobs as projects.
+- **Datasets**: summarizes completed and running annotation datasets.
+- **Workspace**: currently supports PDF layout analysis, including upload, model configuration, analysis, and page-level review.
 - **Settings**: manages Chinese UI preferences and prompt templates.
 
 ## Tech Stack
@@ -82,14 +84,16 @@ Do not commit real `.env` files or API keys. Use `backend/.env.example` as the t
 | `./start.sh restart` | Stop existing Markhub listeners and start fresh services. |
 | `cd frontend && npm run lint` | Run TypeScript checking. |
 | `cd frontend && npm run build` | Build the frontend and server bundle. |
-| `PYTHONPYCACHEPREFIX=/private/tmp/markhub_pycache python3 -m py_compile backend/server.py` | Check backend Python syntax without writing cache files into the repo. |
+| `PYTHONPYCACHEPREFIX=/private/tmp/markhub_pycache python3 -m py_compile backend/server.py backend/features/layout_analysis/server.py` | Check backend Python syntax without writing cache files into the repo. |
 
 ## Architecture
 
 ```text
 Markhub/
   backend/
-    server.py              # API routes, PDF rendering, model calls, job storage
+    server.py              # backend entrypoint
+    features/
+      layout_analysis/     # completed PDF layout-analysis annotation service
     static/index.html      # legacy standalone preview UI
     jobs/                  # generated runtime results, ignored by Git
   frontend/
@@ -100,7 +104,9 @@ Markhub/
   start.sh                 # one-command local launcher
 ```
 
-The frontend does not use React Router yet. Top-level view state is managed in `frontend/src/App.tsx`, and the annotation workflow lives mainly in `frontend/src/components/Workspace.tsx`.
+The frontend does not use React Router yet. Top-level view state is managed in `frontend/src/App.tsx`, and the completed layout-analysis annotation workflow lives mainly in `frontend/src/components/Workspace.tsx`.
+
+Backend feature modules follow the standard in `docs/BACKEND_FEATURE_STANDARD.md`: each annotation capability should live in its own folder under `backend/features/`.
 
 ## API Overview
 
@@ -119,6 +125,6 @@ The Python backend exposes a small local API:
 
 ## Current Status
 
-Layout analysis is the active annotation workflow. Bounding box, polygon, keypoints, and text transcription entry points are present as future categories, but they are not implemented as full workflows yet.
+Markhub is intended to be a broader data annotation platform. At this stage, the completed workflow is PDF document layout analysis annotation. Bounding box, polygon, keypoints, and text transcription entry points are present as future annotation categories, but they are not implemented as full workflows yet.
 
 For handoff notes and known caveats, see `AGENT_HANDOFF.md`.

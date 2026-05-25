@@ -1,6 +1,6 @@
 # PDF 版面分析预览系统
 
-本目录是 Markhub 的 Python 后端服务：
+本目录是 Markhub 的 Python 后端服务。Markhub 后端按功能模块组织，当前已经完成并接入的是 `features/layout_analysis/` 中的 PDF 版面分析标注服务：
 
 - 上传 PDF
 - 后端用 PyMuPDF 将 PDF 页面渲染为 PNG
@@ -11,6 +11,19 @@
 - 将 Qwen3-VL `0-1000` grounding 坐标映射回原始预览图坐标
 - 前端在每页完成时立即叠加 bbox 识别框
 - 展示已分析文件列表，并标记每个结果由哪个模型生成；旧结果缺少模型信息时显示 `未知`
+
+## 功能模块结构
+
+```text
+backend/
+  server.py                  # 统一启动入口
+  features/
+    layout_analysis/         # PDF 版面分析标注服务
+      __init__.py
+      server.py              # API、PDF 渲染、模型调用、任务结果处理
+```
+
+后续新增标注能力时，必须在 `backend/features/` 下新增独立功能目录。具体规范见 `../docs/BACKEND_FEATURE_STANDARD.md`。
 
 ## 启动
 

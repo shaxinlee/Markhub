@@ -2,24 +2,26 @@
 
 [English README](README.md)
 
-Markhub 是一个本地文档版面标注与分析工作台。它面向 PDF 文档处理流程：先在本地渲染页面，再调用 OpenAI 兼容的视觉模型进行版面识别，最后把模型输出归一化为可检查、可编辑、可导出的结构化标注数据。
+Markhub 是一个本地数据标注平台，用于构建和检查多模态、计算机视觉等场景所需的结构化数据集。平台设计目标是逐步支持多种标注模式，包括文档版面分析、矩形框、多边形分割、关键点和文字转录等。
 
-当前版本聚焦在 PDF 版面分析：用户可以上传 PDF，选择提示词模板和模型接口，启动分析任务，然后在工作台中查看页面、识别框、版面块类型、JSON 结果和生成的数据集记录。
+当前版本已经完成的是文档版面分析标注流程。用户可以上传 PDF，选择提示词模板和模型接口，启动分析任务，然后在工作台中查看页面、识别框、版面块类型、JSON 结果和生成的数据集记录。
 
 ## 核心能力
 
+- 提供面向标注项目的仪表盘和数据集视图。
+- 已支持完整的 PDF 文档版面分析标注流程。
 - 使用 Qwen/OpenAI 兼容视觉模型分析 PDF 页面版面。
 - 本地渲染 PDF 页面，并将模型输出的 `0-1000` grounding 坐标映射回预览图像素坐标。
 - 识别并展示文档标题、段落标题、正文、表格、图片标题、图片和视觉脚注等版面块。
 - 支持在工作台中查看、筛选、删除、绘制和导出标注块。
-- 将每次分析任务保存为本地数据集记录，方便后续复查。
+- 将每次标注任务保存为本地数据集记录，方便后续复查。
 - 提供提示词模板编辑能力，为当前版面分析和后续标注类型做准备。
 
 ## 产品模块
 
-- **Dashboard**：以项目卡片形式展示真实后端分析任务。
-- **Datasets**：汇总 PDF 版面数据集，包括完成中、运行中和错误状态。
-- **Workspace**：上传 PDF、配置模型参数、运行分析任务并检查页面级标注结果。
+- **Dashboard**：以项目卡片形式展示真实标注任务。
+- **Datasets**：汇总已完成和运行中的标注数据集。
+- **Workspace**：当前支持 PDF 版面分析，包括上传、模型配置、分析任务和页面级结果检查。
 - **Settings**：管理中文界面偏好和提示词模板。
 
 ## 技术栈
@@ -82,14 +84,16 @@ QWEN_RESIZED_HEIGHT=2176
 | `./start.sh restart` | 停止已有 Markhub 监听进程并重新启动服务。 |
 | `cd frontend && npm run lint` | 运行 TypeScript 检查。 |
 | `cd frontend && npm run build` | 构建前端和服务端 bundle。 |
-| `PYTHONPYCACHEPREFIX=/private/tmp/markhub_pycache python3 -m py_compile backend/server.py` | 检查后端 Python 语法，且不把缓存写入仓库。 |
+| `PYTHONPYCACHEPREFIX=/private/tmp/markhub_pycache python3 -m py_compile backend/server.py backend/features/layout_analysis/server.py` | 检查后端 Python 语法，且不把缓存写入仓库。 |
 
 ## 架构概览
 
 ```text
 Markhub/
   backend/
-    server.py              # API 路由、PDF 渲染、模型调用、任务存储
+    server.py              # 后端统一启动入口
+    features/
+      layout_analysis/     # 已完成的 PDF 版面分析标注服务
     static/index.html      # 旧版独立预览页面
     jobs/                  # 运行时生成结果，已被 Git 忽略
   frontend/
@@ -100,7 +104,9 @@ Markhub/
   start.sh                 # 一键本地启动脚本
 ```
 
-前端当前没有引入 React Router。顶层视图状态主要由 `frontend/src/App.tsx` 管理，标注工作流主要集中在 `frontend/src/components/Workspace.tsx`。
+前端当前没有引入 React Router。顶层视图状态主要由 `frontend/src/App.tsx` 管理，已完成的版面分析标注工作流主要集中在 `frontend/src/components/Workspace.tsx`。
+
+后端功能模块遵循 `docs/BACKEND_FEATURE_STANDARD.md` 中的规范：每一种标注能力都应放在 `backend/features/` 下自己的功能目录中。
 
 ## API 概览
 
@@ -119,6 +125,6 @@ Python 后端提供一组本地 API：
 
 ## 当前状态
 
-版面分析是当前已经接通的核心标注流程。Bounding Box、Polygon、Keypoints 和 Text Transcription 已作为未来标注类型入口出现在界面中，但还没有实现完整工作流。
+Markhub 的目标是成为更完整的数据标注平台。当前阶段已经完成的是 PDF 文档版面分析标注流程。Bounding Box、Polygon、Keypoints 和 Text Transcription 已作为未来标注类型入口出现在界面中，但还没有实现完整工作流。
 
 更多交接信息和已知注意事项见 `AGENT_HANDOFF.md`。
