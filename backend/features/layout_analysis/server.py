@@ -279,6 +279,39 @@ def normalize_block_type(value: Any, default: str = "text") -> str:
     return BLOCK_TYPE_ALIASES.get(label, label)
 
 
+def portable_path_ref(path: Optional[Path]) -> str:
+    if not path:
+        return ""
+    candidates = [
+        (DATASETS_DIR, "datasets"),
+        (BACKEND_DIR, "backend"),
+        (BACKEND_DIR.parent, "."),
+    ]
+    resolved = path.resolve()
+    for root, prefix in candidates:
+        try:
+            relative = resolved.relative_to(root.resolve()).as_posix()
+            return f"{prefix}/{relative}" if prefix != "." else relative
+        except ValueError:
+            continue
+    return path.as_posix() if not path.is_absolute() else path.name
+
+
+def sanitize_saved_text(text: str) -> str:
+    replacements = [
+        (DATASETS_DIR, "datasets"),
+        (BACKEND_DIR, "backend"),
+        (BACKEND_DIR.parent, "."),
+    ]
+    sanitized = text
+    for root, prefix in replacements:
+        root_text = root.resolve().as_posix()
+        replacement_prefix = "" if prefix == "." else f"{prefix}/"
+        sanitized = sanitized.replace(f"{root_text}/", replacement_prefix)
+        sanitized = sanitized.replace(root_text, prefix)
+    return sanitized
+
+
 def read_env_file(path: Path = ENV_FILE) -> Dict[str, str]:
     if not path.is_file():
         return {}
@@ -1602,7 +1635,7 @@ def read_json_file(path: Path, default: Any) -> Any:
 def write_json_file(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_name(f"{path.name}.{uuid.uuid4().hex[:8]}.tmp")
-    tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp_path.write_text(sanitize_saved_text(json.dumps(payload, ensure_ascii=False, indent=2)), encoding="utf-8")
     tmp_path.replace(path)
 
 
@@ -2000,7 +2033,7 @@ def run_convert_task(task_id: str, dataset_ids: List[str], target_format: str, m
     try:
         output_dir = resolve_convert_output_dir(dataset_ids, target_format, merge, output_name)
         if output_dir.exists() and not overwrite:
-            raise FileExistsError(f"输出路径已存在: {output_dir}")
+            raise FileExistsError(f"输出路径已存在: {portable_path_ref(output_dir)}")
         if output_dir.exists() and overwrite:
             shutil.rmtree(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -2031,7 +2064,7 @@ def run_convert_task(task_id: str, dataset_ids: List[str], target_format: str, m
             "split_type": split_type,
             "created_at": iso_now(),
             "operator": "",
-            "output_path": str(output_dir),
+            "output_path": portable_path_ref(output_dir),
             "script_version": "markhub-converter-v2",
         }
         write_json_file(output_dir / "convert_config.json", config)
@@ -2039,17 +2072,17 @@ def run_convert_task(task_id: str, dataset_ids: List[str], target_format: str, m
         if target_format == "swift":
             usage_note = (
                 "\nms-swift usage note:\n"
-                f"  cd {output_dir}\n"
+                "  cd <converted_dataset_dir>\n"
                 "  export ROOT_IMAGE_DIR=$PWD\n"
                 "  swift sft --dataset train.jsonl\n"
                 "The images field uses paths relative to this converted dataset directory.\n"
             )
             log_text += usage_note
-            (output_dir / "README_ms_swift.txt").write_text(usage_note, encoding="utf-8")
-        (output_dir / "convert_log.txt").write_text(log_text, encoding="utf-8")
+            (output_dir / "README_ms_swift.txt").write_text(sanitize_saved_text(usage_note), encoding="utf-8")
+        (output_dir / "convert_log.txt").write_text(sanitize_saved_text(log_text), encoding="utf-8")
 
         status = "partial_success" if skipped else "success"
-        task.update({"status": status, "output_path": str(output_dir), "message": "转换完成", "skipped_samples": skipped})
+        task.update({"status": status, "output_path": portable_path_ref(output_dir), "message": "转换完成", "skipped_samples": skipped})
         for dataset_id in dataset_ids:
             state = read_dataset_state(dataset_id)
             state["convert_status"] = status
@@ -2062,7 +2095,7 @@ def run_convert_task(task_id: str, dataset_ids: List[str], target_format: str, m
                     "task_id": task_id,
                     "target_format": target_format,
                     "status": status,
-                    "output_path": str(output_dir),
+                    "output_path": portable_path_ref(output_dir),
                     "created_at": config["created_at"],
                     "skipped_samples": skipped,
                 }
@@ -2073,7 +2106,7 @@ def run_convert_task(task_id: str, dataset_ids: List[str], target_format: str, m
         task.update({"status": "failed", "error": error, "message": "转换失败", "skipped_samples": skipped})
         if output_dir:
             output_dir.mkdir(parents=True, exist_ok=True)
-            (output_dir / "convert_log.txt").write_text("\n".join(logs + [error]), encoding="utf-8")
+            (output_dir / "convert_log.txt").write_text(sanitize_saved_text("\n".join(logs + [error])), encoding="utf-8")
         for dataset_id in dataset_ids:
             try:
                 state = read_dataset_state(dataset_id)
@@ -2084,7 +2117,7 @@ def run_convert_task(task_id: str, dataset_ids: List[str], target_format: str, m
                         "task_id": task_id,
                         "target_format": target_format,
                         "status": "failed",
-                        "output_path": str(output_dir or ""),
+                        "output_path": portable_path_ref(output_dir),
                         "created_at": iso_now(),
                         "error": error,
                         "skipped_samples": skipped,
@@ -2193,7 +2226,7 @@ def write_split_files(output_dir: Path, samples: List[Dict[str, Any]], split_typ
     for file_name, split_samples in split_map.items():
         with (output_dir / file_name).open("w", encoding="utf-8") as f:
             for sample in split_samples:
-                f.write(json.dumps(sample, ensure_ascii=False) + "\n")
+                f.write(sanitize_saved_text(json.dumps(sample, ensure_ascii=False)) + "\n")
         file_names.append(file_name)
     return file_names
 
