@@ -1525,7 +1525,7 @@ def read_json_file(path: Path, default: Any) -> Any:
 
 def write_json_file(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    tmp_path = path.with_name(f"{path.name}.{uuid.uuid4().hex[:8]}.tmp")
     tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     tmp_path.replace(path)
 
@@ -1577,6 +1577,38 @@ def read_dataset_state(job_id: str, payload: Optional[Dict[str, Any]] = None) ->
 def write_dataset_state(job_id: str, state: Dict[str, Any]) -> None:
     state["updated_at"] = int(time.time())
     write_json_file(dataset_state_path(job_id), state)
+
+
+def delete_dataset(job_id: str) -> Dict[str, Any]:
+    resolved_job_id = resolve_dataset_job_id(job_id)
+    job_dir = find_job_dir(resolved_job_id).resolve()
+    if not any(str(job_dir).startswith(str(root.resolve())) for root in job_storage_roots()) or not job_dir.is_dir():
+        raise FileNotFoundError(f"dataset not found: {job_id}")
+    shutil.rmtree(job_dir)
+    shutil.rmtree(second_annotation_dir(resolved_job_id), ignore_errors=True)
+    return {"dataset_id": resolved_job_id, "deleted": True}
+
+
+def delete_datasets(body: Dict[str, Any]) -> Dict[str, Any]:
+    delete_all = bool(body.get("delete_all", False))
+    dataset_ids = body.get("dataset_ids")
+    if delete_all:
+        ids = [str(item.get("dataset_id") or item.get("job_id")) for item in list_dataset_summaries()]
+    elif isinstance(dataset_ids, list):
+        ids = [str(item) for item in dataset_ids if str(item).strip()]
+    else:
+        raise ValueError("missing dataset_ids")
+    if not ids:
+        return {"deleted": [], "failed": [], "count": 0}
+
+    deleted: List[Dict[str, Any]] = []
+    failed: List[Dict[str, Any]] = []
+    for dataset_id in ids:
+        try:
+            deleted.append(delete_dataset(dataset_id))
+        except Exception as exc:
+            failed.append({"dataset_id": dataset_id, "error": f"{type(exc).__name__}: {exc}"})
+    return {"deleted": deleted, "failed": failed, "count": len(deleted)}
 
 
 def dataset_summary(job_id: str, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -2293,19 +2325,25 @@ class LayoutAnalyzerHandler(BaseHTTPRequestHandler):
             except Exception as exc:
                 self.write_json({"error": f"{type(exc).__name__}: {exc}"}, status=HTTPStatus.BAD_REQUEST)
             return
+        dataset_match = re.fullmatch(r"/api/datasets/([A-Za-z0-9_-]+)", path)
+        if dataset_match:
+            try:
+                self.write_json({"deleted": [delete_dataset(dataset_match.group(1))], "failed": [], "count": 1})
+            except FileNotFoundError:
+                self.write_json({"error": "dataset not found"}, status=HTTPStatus.NOT_FOUND)
+            except Exception as exc:
+                self.write_json({"error": f"{type(exc).__name__}: {exc}"}, status=HTTPStatus.BAD_REQUEST)
+            return
         job_match = re.fullmatch(r"/api/jobs/([A-Za-z0-9_-]+)", path)
         if not job_match:
             self.write_json({"error": "not found"}, status=HTTPStatus.NOT_FOUND)
             return
         job_id = job_match.group(1)
-        job_dir = find_job_dir(job_id).resolve()
-        if not any(str(job_dir).startswith(str(root.resolve())) for root in job_storage_roots()) or not job_dir.is_dir():
-            self.write_json({"error": "job not found"}, status=HTTPStatus.NOT_FOUND)
-            return
         try:
-            shutil.rmtree(job_dir)
-            shutil.rmtree(second_annotation_dir(job_id), ignore_errors=True)
+            delete_dataset(job_id)
             self.write_json({"ok": True, "job_id": job_id})
+        except FileNotFoundError:
+            self.write_json({"error": "job not found"}, status=HTTPStatus.NOT_FOUND)
         except Exception as exc:
             self.write_json({"error": f"{type(exc).__name__}: {exc}"}, status=HTTPStatus.BAD_REQUEST)
 
@@ -2337,6 +2375,13 @@ class LayoutAnalyzerHandler(BaseHTTPRequestHandler):
                     self.write_json(test_prompt(prompt_id, body))
             except FileNotFoundError:
                 self.write_json({"error": "prompt not found"}, status=HTTPStatus.NOT_FOUND)
+            except Exception as exc:
+                traceback.print_exc()
+                self.write_json({"error": f"{type(exc).__name__}: {exc}"}, status=HTTPStatus.BAD_REQUEST)
+            return
+        if parsed.path == "/api/datasets/delete":
+            try:
+                self.write_json(delete_datasets(self.read_json_body()))
             except Exception as exc:
                 traceback.print_exc()
                 self.write_json({"error": f"{type(exc).__name__}: {exc}"}, status=HTTPStatus.BAD_REQUEST)

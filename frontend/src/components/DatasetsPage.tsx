@@ -19,6 +19,7 @@ import {
   RefreshCw,
   Search,
   SquareCheckBig,
+  Trash2,
   UserCircle,
   Wrench,
   X
@@ -140,12 +141,45 @@ export default function DatasetsPage({ jobs, onNavigate, onCreateDataset, onOpen
   }, [activeCategory, datasets, searchTerm, statusFilter]);
 
   function toggleSelection(dataset: DatasetItem) {
-    if (!isConvertible(dataset)) {
-      setConvertError(`「${dataset.name}」当前状态不可转换，请选择已处理或已标注完成的数据集。`);
-      return;
-    }
     setConvertError('');
     setSelectedIds((current) => current.includes(dataset.id) ? current.filter((id) => id !== dataset.id) : [...current, dataset.id]);
+  }
+
+  async function deleteSelectedDatasets() {
+    if (selectedIds.length === 0) {
+      setConvertError('请先选择要删除的数据集。');
+      return;
+    }
+    if (!window.confirm(`确认删除已选择的 ${selectedIds.length} 个数据集吗？该操作会删除一次标注和二次标注文件。`)) return;
+    await deleteDatasets({ dataset_ids: selectedIds });
+  }
+
+  async function deleteAllDatasets() {
+    if (datasets.length === 0) {
+      setConvertError('当前没有可删除的数据集。');
+      return;
+    }
+    if (!window.confirm(`确认删除全部 ${datasets.length} 个数据集吗？该操作会清空当前数据集列表中的一次标注和二次标注文件。`)) return;
+    await deleteDatasets({ delete_all: true });
+  }
+
+  async function deleteDatasets(payload: { dataset_ids?: string[]; delete_all?: boolean }) {
+    try {
+      setConvertError('');
+      setConvertMessage('正在删除数据集...');
+      const response = await fetch('/api/datasets/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || result.error) throw new Error(result.error || `HTTP ${response.status}`);
+      setSelectedIds([]);
+      setConvertMessage(`已删除 ${result.count || 0} 个数据集${result.failed?.length ? `，失败 ${result.failed.length} 个：${result.failed.map((item: { dataset_id: string; error: string }) => `${item.dataset_id} ${item.error}`).join('；')}` : ''}`);
+      onRefreshDatasets();
+    } catch (error) {
+      setConvertError(error instanceof Error ? error.message : String(error));
+    }
   }
 
   function openConvertDialog(targetFormat: TargetFormat) {
@@ -357,6 +391,34 @@ export default function DatasetsPage({ jobs, onNavigate, onCreateDataset, onOpen
                   </div>
                   <button
                     type="button"
+                    onClick={() => {
+                      const visibleIds = filteredDatasets.map((dataset) => dataset.id);
+                      const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.includes(id));
+                      setSelectedIds(allVisibleSelected ? [] : visibleIds);
+                    }}
+                    className="mr-2 flex items-center gap-2 rounded-[0.75rem] border border-outline-variant/50 px-3 py-2 text-label-md font-medium text-on-surface-variant transition-colors hover:bg-surface-container active:scale-[0.98]"
+                  >
+                    {filteredDatasets.length > 0 && filteredDatasets.every((dataset) => selectedIds.includes(dataset.id)) ? '取消全选' : '全选当前'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={deleteSelectedDatasets}
+                    disabled={selectedIds.length === 0}
+                    className="mr-2 flex items-center gap-2 rounded-[0.75rem] border border-error/30 px-3 py-2 text-label-md font-medium text-error transition-colors hover:bg-error/10 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <Trash2 className="h-[18px] w-[18px]" />
+                    删除所选
+                  </button>
+                  <button
+                    type="button"
+                    onClick={deleteAllDatasets}
+                    disabled={datasets.length === 0}
+                    className="mr-2 flex items-center gap-2 rounded-[0.75rem] border border-error/30 px-3 py-2 text-label-md font-medium text-error transition-colors hover:bg-error/10 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    全部删除
+                  </button>
+                  <button
+                    type="button"
                     onClick={onRefreshDatasets}
                     className="mr-2 flex items-center gap-2 rounded-[0.75rem] border border-outline-variant/50 px-3 py-2 text-label-md font-medium text-on-surface-variant transition-colors hover:bg-surface-container active:scale-[0.98]"
                   >
@@ -390,7 +452,11 @@ export default function DatasetsPage({ jobs, onNavigate, onCreateDataset, onOpen
                         onOpen={() => onOpenDataset(dataset.id)}
                         onSecondAnnotate={() => onSecondAnnotate(dataset.id)}
                         onConvert={() => {
-                          if (!selectedIds.includes(dataset.id)) setSelectedIds([dataset.id]);
+                          if (!isConvertible(dataset)) {
+                            setConvertError(`「${dataset.name}」当前状态不可转换，请选择已处理或已标注完成的数据集。`);
+                            return;
+                          }
+                          setSelectedIds([dataset.id]);
                           setConvertDialog({ open: true, targetFormat: 'swift' });
                           setOutputName(defaultOutputName('swift', false));
                         }}
@@ -608,10 +674,9 @@ function DatasetCard({
           <input
             type="checkbox"
             checked={selected}
-            disabled={!isConvertible(dataset)}
             onClick={(event) => event.stopPropagation()}
             onChange={onToggleSelected}
-            className="h-4 w-4 accent-primary disabled:cursor-not-allowed disabled:opacity-40"
+            className="h-4 w-4 accent-primary"
             aria-label={`Select ${dataset.name}`}
           />
           <StatusBadge status={dataset.status} />
