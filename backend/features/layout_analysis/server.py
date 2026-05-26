@@ -57,10 +57,16 @@ BLOCK_TYPES = {
     "doc_title",
     "paragraph_title",
     "text",
+    "list",
     "table",
+    "formula",
+    "chart",
     "figure_title",
     "image",
     "vision_footnote",
+    "header",
+    "footer",
+    "caption",
     "handwriting",
     "seal",
 }
@@ -87,19 +93,25 @@ RESIZE_PRESETS = {
 
 LAYOUT_PROMPT = """你是一个专业的文档版面分析模型。现在给你一张文档页面图片，请识别页面中的所有主要版面块，并按照阅读顺序输出结构化 JSON。
 
-你的任务不是总结页面内容，而是进行版面结构解析，包括标题、正文、表格、图片、图题、脚注、手写字、印章等区域。
+你的任务不是总结页面内容，而是进行版面结构解析，包括标题、正文、列表、表格、公式、图表、图片、图题/说明、页眉页脚、脚注、手写字、印章等区域。
 
 请严格只使用以下 block_type 类型，不允许创造新类型：
 
 1. doc_title：文档总标题，通常出现在封面或首页中央，表示整份文档的名称。
 2. paragraph_title：章节标题、段落标题、小节标题，例如“第一节 重要提示”“1、公司简介”“（一）公司的主营业务”。
-3. text：普通正文、列表项、编号段落、普通说明文字。
-4. table：表格区域，包括财务表格、信息表、带网格线或明显行列结构的内容。若表格内部含文字，请尽量输出为 HTML table。
-5. figure_title：图片、产品图、图表上方或下方的标题，例如“好人家主要产品一览”。
-6. image：纯图片、产品图、照片、图示、流程图、图表主体等非文本视觉区域。
-7. vision_footnote：视觉相关脚注或表格/图表单位说明，例如“单位：元 币种：人民币”。
-8. handwriting：手写字、手写批注、手写签名、手写日期或人工填写的手写内容。如果能辨认文字，请写入 text；无法辨认时 text 可为空字符串。
-9. seal：印章、签章、骑缝章、公司章、个人章等盖章区域。如果印章文字可辨认，请写入 text；无法辨认时 text 可为空字符串。
+3. text：普通正文、普通说明文字、无法归入其他结构类型的印刷文本。
+4. list：项目符号列表、编号列表、条款列表、目录式列表、连续短条目。每个列表组可合并为一个 list 块。
+5. table：表格区域，包括财务表格、信息表、带网格线或明显行列结构的内容。若表格内部含文字，请尽量输出为 HTML table。
+6. formula：数学公式、化学式、独立公式行、公式编号区域。能转写时优先输出 LaTeX 或原文。
+7. chart：柱状图、折线图、饼图、散点图、面积图、组合图等数据可视化图表主体；图表标题单独用 figure_title 或 caption。
+8. figure_title：图片、产品图、图表上方或下方的标题，例如“好人家主要产品一览”。
+9. image：纯图片、产品图、照片、插图、流程图、架构图、示意图等非表格/非公式/非图表视觉区域。
+10. vision_footnote：视觉相关脚注或表格/图表单位说明，例如“单位：元 币种：人民币”“资料来源：公司公告”。
+11. header：页眉区域，包括重复出现的文件名、章节名、公司名、合同编号等页顶辅助信息。
+12. footer：页脚区域，包括页码、版权、保密说明、底部重复说明等页底辅助信息。
+13. caption：图、表、公式、图片的说明文字或题注；如果只是图表单位/资料来源，优先用 vision_footnote。
+14. handwriting：手写字、手写批注、手写签名、手写日期或人工填写的手写内容。如果能辨认文字，请写入 text；无法辨认时 text 可为空字符串。
+15. seal：印章、签章、骑缝章、公司章、个人章等盖章区域。如果印章文字可辨认，请写入 text；无法辨认时 text 可为空字符串。
 
 请输出以下 JSON 格式：
 
@@ -108,10 +120,10 @@ LAYOUT_PROMPT = """你是一个专业的文档版面分析模型。现在给你�
   "blocks": [
     {
       "id": "p{page_no:03d}_b{block_no:03d}",
-      "text": "<该区域中的文字；如果是 image/seal/handwriting 且无可读文字，则为空字符串；如果是 table，则尽量输出 HTML table>",
+      "text": "<该区域中的文字；如果是 image/chart/seal/handwriting 且无可读文字，则为空字符串；如果是 table，则尽量输出 HTML table；如果是 formula，则尽量输出 LaTeX 或原文>",
       "bbox": [x1, y1, x2, y2],
       "page_id": <页码，从0开始>,
-      "block_type": "<必须是上述9类之一>",
+      "block_type": "<必须是上述15类之一>",
       "weak_heading": <true 或 false>,
       "level": "<H1/H2/H3 或 null>"
     }
@@ -125,11 +137,15 @@ LAYOUT_PROMPT = """你是一个专业的文档版面分析模型。现在给你�
 - bbox 格式为 [左上角x, 左上角y, 右下角x, 右下角y]，每个值都必须在 0 到 1000 之间。
 - 坐标必须覆盖完整版面块，不要只框住单行文字。
 - 对连续正文段落，如果语义和版面连续，可以合并为一个 text 块。
+- 对项目符号、编号条款、目录条目等明显列表结构，优先标为 list，不要混入普通正文。
 - 对标题和正文要分开，不要把标题合并进正文。
-- 对表格标题、表格单位说明和表格主体要尽量分开：
+- 对表格、公式、图表的标题、单位说明、主体要尽量分开：
   - 表格标题：figure_title 或 paragraph_title，视其是否是图/表说明标题；
-  - 单位说明：vision_footnote；
+  - 图、表、公式说明文字：caption；
+  - 单位说明、资料来源、注释：vision_footnote；
   - 表格主体：table。
+  - 公式主体：formula。
+  - 图表主体：chart。
 
 标题层级判断：
 - 必须为每个 doc_title / paragraph_title 判断 level，只能输出 H1、H2、H3 或 null。
@@ -140,9 +156,15 @@ LAYOUT_PROMPT = """你是一个专业的文档版面分析模型。现在给你�
 - H3：更低层级标题，通常编号形如“（一）”“（二）”“1）”“2）”“3.1”“4.1”，或出现在 H2 下面的局部模式/分项标题。财报中如“（一）公司的主营业务”“1、采购模式”“2、生产模式”“3、销售模式”“3.1 近3年的主要会计数据和财务指标”“3.2 报告期分季度的主要会计数据”“4.1 报告期末...”应为 H3。
 - 如果同一页标题视觉明显但编号弱，按其所在位置和语义层级判断；如果标题视觉不明显但根据编号、位置或语义应为标题，则 block_type=paragraph_title 且 weak_heading=true。
 - 如果标题视觉明显，例如居中、加粗、字号较大、单独成行，则 weak_heading=false。
-- 普通正文、表格、图片、图题、脚注的 level 必须为 null。
-- figure_title、table、image、vision_footnote、handwriting、seal 即使包含编号，也不要设置 H1/H2/H3，level 必须为 null。
+- 普通正文、列表、表格、公式、图表、图片、图题、题注、页眉页脚、脚注的 level 必须为 null。
+- figure_title、list、table、formula、chart、image、vision_footnote、header、footer、caption、handwriting、seal 即使包含编号，也不要设置 H1/H2/H3，level 必须为 null。
 - 不确定层级时，优先保持保守：章级用 H1，章内主条目用 H2，主条目下的模式/分项用 H3。
+
+复杂元素识别要求：
+- 不要把公式误标为 image 或 text；独立公式、公式组、带编号公式统一标为 formula。
+- 不要把数据图表误标为 image；柱状图、折线图、饼图、散点图、组合图等统一标为 chart。
+- 图表、公式、表格的标题或说明不要并入主体块，优先拆成 figure_title、caption 或 vision_footnote。
+- 页眉页脚如果只是重复装饰信息可以忽略；如果包含页码、合同编号、文件编号、公司名、保密说明等可追溯信息，分别标为 header 或 footer。
 
 手写字与印章识别要求：
 - 不要忽略手写签名、手写日期、手写金额、手写批注、手写勾画旁的文字；这类内容统一标为 handwriting。
@@ -151,7 +173,7 @@ LAYOUT_PROMPT = """你是一个专业的文档版面分析模型。现在给你�
 
 阅读顺序要求：
 - 按从上到下、从左到右的自然阅读顺序输出 blocks。
-- 页眉、页脚、页码如果不是正文核心内容，可忽略；如果包含重要文本，可标为 text 或 vision_footnote。
+- 页眉、页脚、页码如果不是正文核心内容，可忽略；如果包含重要文本或编号，可标为 header 或 footer。
 - 不要输出解释文字，不要输出 Markdown，只输出合法 JSON。"""
 
 PROMPT_TEMPLATES = {
@@ -431,7 +453,7 @@ def default_prompt_record() -> Dict[str, Any]:
     record = {
         "id": DEFAULT_PROMPT_TEMPLATE_ID,
         "name": "默认版面分析提示词",
-        "description": "系统内置的文档版面分析 Prompt，识别标题、正文、表格、图片、脚注、手写字和印章。",
+        "description": "系统内置的文档版面分析 Prompt，识别标题、正文、列表、表格、公式、图表、图片、页眉页脚、脚注、手写字和印章。",
         "type": "data_annotation",
         "task_type": "layout_analysis",
         "model_name": "all",
@@ -1006,7 +1028,7 @@ def iter_result_files() -> Iterable[Path]:
 
 
 def clean_old_jobs(max_age_hours: int = 24) -> None:
-    # 历史版本把分析任务当作临时缓存清理；现在它们是 datasets 下的一次标注资产，必须持久保留。
+    # 历史版本把分析任务当作临时缓存清理；现在它们是 datasets 下的 Completed 数据集资产，必须持久保留。
     ensure_dataset_storage()
 
 
@@ -1556,6 +1578,7 @@ def default_dataset_state(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any
 def read_dataset_state(job_id: str, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     if payload is None:
         payload = read_job_result(job_id)
+    first_annotated_at = int(result_path(job_id).stat().st_mtime) if result_path(job_id).exists() else None
     state = read_json_file(dataset_state_path(job_id), None)
     if not isinstance(state, dict):
         state = read_json_file(legacy_dataset_state_path(job_id), None)
@@ -1568,9 +1591,14 @@ def read_dataset_state(job_id: str, payload: Optional[Dict[str, Any]] = None) ->
     state.setdefault("convert_error", "")
     state.setdefault("converted_formats", [])
     state.setdefault("convert_records", [])
-    state.setdefault("first_annotated_at", int(result_path(job_id).stat().st_mtime) if result_path(job_id).exists() else None)
+    state.setdefault("first_annotated_at", first_annotated_at)
     state.setdefault("second_annotated_at", None)
     state.setdefault("updated_at", int(time.time()))
+    if str(payload.get("status") or "").lower() in {"complete", "completed", "done"} and state.get("annotation_status") in {None, "", "none"}:
+        # Older dataset_state files may predate explicit annotation stages. A completed layout-analysis result is the first annotation version.
+        state["annotation_status"] = "first_annotated"
+        state["first_annotated_at"] = state.get("first_annotated_at") or first_annotated_at
+        write_dataset_state(job_id, state)
     return state
 
 
@@ -1835,7 +1863,7 @@ def overwrite_job_blocks(job_id: str, payload: Dict[str, Any], annotation: Dict[
         page["blocks"] = page_blocks
         blocks.extend(page_blocks)
     payload.setdefault("result", {})["blocks"] = blocks
-    # 覆盖保存会写回一次标注结果，这是高风险操作，前端已做二次确认。
+    # 覆盖保存会写回原始 Completed 标注结果，这是高风险操作，前端已做二次确认。
     write_job_result(job_id, payload)
 
 

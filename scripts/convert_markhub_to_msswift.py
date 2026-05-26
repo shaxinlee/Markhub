@@ -27,8 +27,9 @@ DEFAULT_USER_PROMPT = """<image>
 - 输出对象必须包含 image_path、blocks、context_before、context_after。
 - blocks 中每个对象必须包含 id、text、bbox、page_id、block_type、weak_heading、level。
 - bbox 使用 0-1000 相对坐标，格式为 [左上角x, 左上角y, 右下角x, 右下角y]。
-- block_type 只能使用 doc_title、paragraph_title、text、table、figure_title、image、vision_footnote、handwriting、seal。
+- block_type 只能使用 doc_title、paragraph_title、text、list、table、formula、chart、figure_title、image、vision_footnote、header、footer、caption、handwriting、seal。
 - doc_title / paragraph_title 需要判断 level，可为 H1、H2、H3；其他类型 level 必须为 null。
+- formula 表示数学/化学公式；chart 表示柱状图、折线图、饼图等数据图表；header/footer 表示页眉页脚；caption 表示图表公式说明。
 - handwriting 表示手写字、手写签名、手写日期、手写批注等；seal 表示印章、签章、骑缝章等。
 """
 

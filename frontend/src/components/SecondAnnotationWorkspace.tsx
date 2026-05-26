@@ -70,18 +70,18 @@ const DEFAULT_LABEL_TYPES = [
   'title',
   'paragraph_title',
   'text',
+  'list',
   'handwriting',
   'table',
+  'formula',
   'figure',
   'chart',
-  'formula',
   'seal',
   'header',
   'footer',
   'footnote',
   'reference',
   'caption',
-  'list',
   'other',
 ];
 
@@ -142,7 +142,7 @@ export default function SecondAnnotationWorkspace({ datasetId, onGoBack }: Secon
       const message = err instanceof Error ? err.message : String(err);
       if (!message.includes('404') && !message.includes('dataset not found')) throw err;
       const job = await fetchJson<BackendJob>(`/api/jobs/${datasetId}/result`);
-      setMessage('当前后端未提供二次标注读取接口，已从一次标注结果临时加载。保存草稿/提交需要重启到最新后端。');
+      setMessage('当前后端未提供二次标注读取接口，已从原始 Completed 结果临时加载。保存草稿/提交需要重启到最新后端。');
       return backendJobToAnnotationPayload(job);
     }
   }
@@ -319,7 +319,7 @@ export default function SecondAnnotationWorkspace({ datasetId, onGoBack }: Secon
 
   async function save(mode: 'draft' | 'submit' | 'overwrite') {
     if (!payload) return;
-    if (mode === 'overwrite' && !window.confirm('该操作将覆盖原有一次标注结果，是否继续？')) return;
+    if (mode === 'overwrite' && !window.confirm('该操作将覆盖原始 Completed 标注结果，是否继续？')) return;
     const path = mode === 'draft'
       ? `/api/datasets/${datasetId}/annotations/second/draft`
       : mode === 'overwrite'

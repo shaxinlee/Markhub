@@ -135,10 +135,16 @@ export type BackendBlockType =
   | 'doc_title'
   | 'paragraph_title'
   | 'text'
+  | 'list'
   | 'table'
+  | 'formula'
+  | 'chart'
   | 'figure_title'
   | 'image'
   | 'vision_footnote'
+  | 'header'
+  | 'footer'
+  | 'caption'
   | 'handwriting'
   | 'seal';
 

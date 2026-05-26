@@ -36,7 +36,7 @@ interface DatasetsPageProps {
   onRefreshDatasets: () => void;
 }
 
-type DatasetCategory = 'All' | '一次标注' | '已二次标注' | 'ms-swift' | 'Completed' | 'Running' | 'Error';
+type DatasetCategory = 'All' | '已二次标注' | 'ms-swift' | 'Completed' | 'Running' | 'Error';
 type DatasetStatus = 'Completed' | 'Running' | 'Error';
 type TargetFormat = 'llamafactory' | 'swift';
 type SplitType = 'train' | 'val' | 'test' | 'all';
@@ -130,7 +130,6 @@ export default function DatasetsPage({ jobs, onNavigate, onCreateDataset, onOpen
     return datasets.filter((dataset) => {
       const matchesCategory =
         activeCategory === 'All'
-        || (activeCategory === '一次标注' && dataset.annotationStatus === 'first_annotated')
         || (activeCategory === '已二次标注' && dataset.annotationStatus === 'second_annotated')
         || (activeCategory === 'ms-swift' && hasSwiftConversion(dataset))
         || dataset.status === activeCategory;
@@ -150,7 +149,7 @@ export default function DatasetsPage({ jobs, onNavigate, onCreateDataset, onOpen
       setConvertError('请先选择要删除的数据集。');
       return;
     }
-    if (!window.confirm(`确认删除已选择的 ${selectedIds.length} 个数据集吗？该操作会删除一次标注和二次标注文件。`)) return;
+    if (!window.confirm(`确认删除已选择的 ${selectedIds.length} 个数据集吗？该操作会删除数据集和二次标注文件。`)) return;
     await deleteDatasets({ dataset_ids: selectedIds });
   }
 
@@ -159,7 +158,7 @@ export default function DatasetsPage({ jobs, onNavigate, onCreateDataset, onOpen
       setConvertError('当前没有可删除的数据集。');
       return;
     }
-    if (!window.confirm(`确认删除全部 ${datasets.length} 个数据集吗？该操作会清空当前数据集列表中的一次标注和二次标注文件。`)) return;
+    if (!window.confirm(`确认删除全部 ${datasets.length} 个数据集吗？该操作会清空当前数据集列表和二次标注文件。`)) return;
     await deleteDatasets({ delete_all: true });
   }
 
@@ -370,7 +369,7 @@ export default function DatasetsPage({ jobs, onNavigate, onCreateDataset, onOpen
 
               <div className="relative z-10 mb-8 flex flex-col items-center justify-between gap-4 border-b border-surface-variant pb-4 md:flex-row">
                 <div className="flex w-full gap-6 overflow-x-auto md:w-auto">
-                  {(['All', '一次标注', '已二次标注', 'ms-swift', 'Completed', 'Running', 'Error'] as DatasetCategory[]).map((category) => (
+                  {(['All', '已二次标注', 'ms-swift', 'Completed', 'Running', 'Error'] as DatasetCategory[]).map((category) => (
                     <button
                       key={category}
                       onClick={() => setActiveCategory(category)}
@@ -470,7 +469,7 @@ export default function DatasetsPage({ jobs, onNavigate, onCreateDataset, onOpen
                   <h3 className="text-headline-sm font-semibold text-primary">{activeCategory === 'ms-swift' ? 'No ms-swift conversions found' : 'No backend datasets found'}</h3>
                   <p className="mx-auto mt-2 max-w-md text-body-md text-on-surface-variant">
                     {activeCategory === 'ms-swift'
-                      ? '选择一次标注完成的数据集，点击 ms-swift 转换后，转换结果会出现在这个列表中。'
+                      ? '选择 Completed 数据集，点击 ms-swift 转换后，转换结果会出现在这个列表中。'
                       : 'Run a PDF analysis from the annotation workspace and the generated dataset records will appear here.'}
                   </p>
                 </div>
@@ -503,7 +502,7 @@ export default function DatasetsPage({ jobs, onNavigate, onCreateDataset, onOpen
                 {selectedDatasets.map((dataset) => (
                   <div key={dataset.id} className="flex items-center justify-between py-1 text-label-md">
                     <span className="font-semibold text-primary">{dataset.name}</span>
-                    <span className="text-on-surface-variant">{annotationStatusText(dataset.annotationStatus)}</span>
+                    <span className="text-on-surface-variant">{secondAnnotationStatusText(dataset.annotationStatus)}</span>
                   </div>
                 ))}
               </div>
@@ -651,7 +650,7 @@ function DatasetCard({
   onConvert: () => void;
 }) {
   const isError = dataset.status === 'Error';
-  const canSecondAnnotate = dataset.status === 'Completed' && ['first_annotated', 'second_annotated'].includes(dataset.annotationStatus || '');
+  const canSecondAnnotate = dataset.status === 'Completed';
 
   return (
     <article
@@ -701,7 +700,7 @@ function DatasetCard({
         <p>{dataset.blockCount} layout blocks</p>
         <p>{dataset.model}</p>
         {dataset.templateName && <p>{dataset.templateName}</p>}
-        <p>标注阶段：{annotationStatusText(dataset.annotationStatus)}</p>
+        <p>二次标注状态：{secondAnnotationStatusText(dataset.annotationStatus)}</p>
         <p>转换状态：{convertStatusText(dataset.convertStatus)}</p>
         {dataset.convertedFormats.length > 0 && <p>格式：{dataset.convertedFormats.map(formatLabel).join(', ')}</p>}
         {dataset.lastConvertPath && (
@@ -726,7 +725,7 @@ function DatasetCard({
         ) : (
           <div className={`mb-3 space-y-1 text-label-sm font-semibold ${isError ? 'text-on-surface-variant/50' : 'text-on-surface-variant/70'}`}>
             <p className="flex items-center gap-1"><Clock3 className="h-3.5 w-3.5" />{dataset.updated}</p>
-            <p>一次标注：{formatTimestamp(dataset.firstAnnotatedAt)}</p>
+            <p>完成时间：{formatTimestamp(dataset.firstAnnotatedAt)}</p>
             <p>二次标注：{formatTimestamp(dataset.secondAnnotatedAt)}</p>
           </div>
         )}
@@ -776,6 +775,7 @@ function mapJobToDataset(job: BackendJobSummary): DatasetItem {
   const progress = job.page_count > 0 ? Math.round(((job.completed_pages || 0) / job.page_count) * 100) : 0;
   const status = normalizeStatus(job.status);
   const datasetId = job.dataset_id || job.job_id;
+  const annotationStatus = normalizeAnnotationStatus(job.annotation_status, status);
 
   return {
     id: datasetId,
@@ -792,7 +792,7 @@ function mapJobToDataset(job: BackendJobSummary): DatasetItem {
     pageCount: job.page_count || 0,
     model: job.model || 'Unknown model',
     templateName: job.prompt_template?.name,
-    annotationStatus: job.annotation_status || (status === 'Completed' ? 'first_annotated' : 'none'),
+    annotationStatus,
     convertStatus: job.convert_status || 'none',
     convertError: job.convert_error,
     convertedFormats: job.converted_formats || [],
@@ -801,6 +801,11 @@ function mapJobToDataset(job: BackendJobSummary): DatasetItem {
     lastConvertPath: job.last_convert_record?.output_path,
     lastConvertFormat: job.last_convert_record?.target_format,
   };
+}
+
+function normalizeAnnotationStatus(status: BackendJobSummary['annotation_status'], datasetStatus: DatasetStatus): BackendJobSummary['annotation_status'] {
+  if (status && status !== 'none') return status;
+  return datasetStatus === 'Completed' ? 'first_annotated' : 'none';
 }
 
 function normalizeStatus(status: string): DatasetStatus {
@@ -840,16 +845,16 @@ function formatLabel(format: string): string {
   return format;
 }
 
-function annotationStatusText(status?: BackendJobSummary['annotation_status']): string {
+function secondAnnotationStatusText(status?: BackendJobSummary['annotation_status']): string {
   switch (status) {
     case 'second_annotated':
       return '已二次标注';
     case 'second_annotating':
       return '二次标注中';
     case 'first_annotated':
-      return '一次标注完成';
+      return '未二次标注';
     default:
-      return '未标注';
+      return '未二次标注';
   }
 }
 
