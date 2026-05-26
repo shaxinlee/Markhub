@@ -41,7 +41,13 @@ except Exception as exc:  # pragma: no cover - startup guard
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 FEATURE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BACKEND_DIR / "static"
-JOBS_DIR = BACKEND_DIR / "jobs"
+DATASETS_DIR = BACKEND_DIR / "datasets"
+FIRST_ANNOTATIONS_DIR = DATASETS_DIR / "first_annotations"
+SECOND_ANNOTATIONS_DIR = DATASETS_DIR / "second_annotations"
+SWIFT_DATASETS_DIR = DATASETS_DIR / "swift_datasets"
+LLAMAFACTORY_DATASETS_DIR = DATASETS_DIR / "llamafactory_datasets"
+JOBS_DIR = FIRST_ANNOTATIONS_DIR
+LEGACY_JOBS_DIR = BACKEND_DIR / "jobs"
 ENV_FILE = BACKEND_DIR / ".env"
 PROMPT_TEMPLATES_FILE = BACKEND_DIR / "prompt_templates.json"
 
@@ -53,6 +59,8 @@ BLOCK_TYPES = {
     "figure_title",
     "image",
     "vision_footnote",
+    "handwriting",
+    "seal",
 }
 LEVELS = {"H1", "H2", "H3"}
 
@@ -77,7 +85,7 @@ RESIZE_PRESETS = {
 
 LAYOUT_PROMPT = """你是一个专业的文档版面分析模型。现在给你一张文档页面图片，请识别页面中的所有主要版面块，并按照阅读顺序输出结构化 JSON。
 
-你的任务不是总结页面内容，而是进行版面结构解析，包括标题、正文、表格、图片、图题、脚注等区域。
+你的任务不是总结页面内容，而是进行版面结构解析，包括标题、正文、表格、图片、图题、脚注、手写字、印章等区域。
 
 请严格只使用以下 block_type 类型，不允许创造新类型：
 
@@ -88,6 +96,8 @@ LAYOUT_PROMPT = """你是一个专业的文档版面分析模型。现在给你�
 5. figure_title：图片、产品图、图表上方或下方的标题，例如“好人家主要产品一览”。
 6. image：纯图片、产品图、照片、图示、流程图、图表主体等非文本视觉区域。
 7. vision_footnote：视觉相关脚注或表格/图表单位说明，例如“单位：元 币种：人民币”。
+8. handwriting：手写字、手写批注、手写签名、手写日期或人工填写的手写内容。如果能辨认文字，请写入 text；无法辨认时 text 可为空字符串。
+9. seal：印章、签章、骑缝章、公司章、个人章等盖章区域。如果印章文字可辨认，请写入 text；无法辨认时 text 可为空字符串。
 
 请输出以下 JSON 格式：
 
@@ -96,10 +106,10 @@ LAYOUT_PROMPT = """你是一个专业的文档版面分析模型。现在给你�
   "blocks": [
     {
       "id": "p{page_no:03d}_b{block_no:03d}",
-      "text": "<该区域中的文字；如果是 image 且无可读文字，则为空字符串；如果是 table，则尽量输出 HTML table>",
+      "text": "<该区域中的文字；如果是 image/seal/handwriting 且无可读文字，则为空字符串；如果是 table，则尽量输出 HTML table>",
       "bbox": [x1, y1, x2, y2],
       "page_id": <页码，从0开始>,
-      "block_type": "<必须是上述7类之一>",
+      "block_type": "<必须是上述9类之一>",
       "weak_heading": <true 或 false>,
       "level": "<H1/H2/H3 或 null>"
     }
@@ -129,8 +139,13 @@ LAYOUT_PROMPT = """你是一个专业的文档版面分析模型。现在给你�
 - 如果同一页标题视觉明显但编号弱，按其所在位置和语义层级判断；如果标题视觉不明显但根据编号、位置或语义应为标题，则 block_type=paragraph_title 且 weak_heading=true。
 - 如果标题视觉明显，例如居中、加粗、字号较大、单独成行，则 weak_heading=false。
 - 普通正文、表格、图片、图题、脚注的 level 必须为 null。
-- figure_title、table、image、vision_footnote 即使包含编号，也不要设置 H1/H2/H3，level 必须为 null。
+- figure_title、table、image、vision_footnote、handwriting、seal 即使包含编号，也不要设置 H1/H2/H3，level 必须为 null。
 - 不确定层级时，优先保持保守：章级用 H1，章内主条目用 H2，主条目下的模式/分项用 H3。
+
+手写字与印章识别要求：
+- 不要忽略手写签名、手写日期、手写金额、手写批注、手写勾画旁的文字；这类内容统一标为 handwriting。
+- 不要把印章误标为 image。圆形章、椭圆章、方章、红章、蓝章、骑缝章等统一标为 seal。
+- handwriting 和 seal 的 bbox 必须覆盖完整手写/盖章区域；如果区域内同时有印刷文字和手写字，请拆成独立块。
 
 阅读顺序要求：
 - 按从上到下、从左到右的自然阅读顺序输出 blocks。
@@ -147,6 +162,29 @@ PROMPT_TEMPLATES = {
 }
 DEFAULT_PROMPT_TEMPLATE_ID = "default_template_1"
 PROMPT_TEMPLATE_CATEGORIES = {"bounding_box", "polygon", "layout", "keypoints", "text_transcription"}
+DATASET_LABEL_TYPES = {
+    "doc_title",
+    "title",
+    "paragraph_title",
+    "text",
+    "table",
+    "figure",
+    "chart",
+    "formula",
+    "seal",
+    "header",
+    "footer",
+    "footnote",
+    "reference",
+    "caption",
+    "list",
+    "other",
+    "figure_title",
+    "image",
+    "vision_footnote",
+    "handwriting",
+}
+CONVERT_TASKS: Dict[str, Dict[str, Any]] = {}
 
 
 def parse_env_line(line: str) -> Optional[Tuple[str, str]]:
@@ -383,6 +421,18 @@ def job_dir_for_model(job_id: str, model: str) -> Path:
     return JOBS_DIR / model_dir_name(model) / job_id
 
 
+def ensure_dataset_storage() -> None:
+    for path in (FIRST_ANNOTATIONS_DIR, SECOND_ANNOTATIONS_DIR, SWIFT_DATASETS_DIR, LLAMAFACTORY_DATASETS_DIR):
+        path.mkdir(parents=True, exist_ok=True)
+
+
+def job_storage_roots() -> List[Path]:
+    roots = [JOBS_DIR]
+    if LEGACY_JOBS_DIR != JOBS_DIR and LEGACY_JOBS_DIR.exists():
+        roots.append(LEGACY_JOBS_DIR)
+    return roots
+
+
 def relative_job_url(path: Path) -> str:
     return "/jobs/" + path.relative_to(JOBS_DIR).as_posix()
 
@@ -391,12 +441,15 @@ def job_asset_path(relative_path: str) -> Path:
     candidate = JOBS_DIR / relative_path
     if candidate.exists():
         return candidate
+    legacy_candidate = LEGACY_JOBS_DIR / relative_path
+    if legacy_candidate.exists():
+        return legacy_candidate
 
     parts = Path(relative_path).parts
     if len(parts) >= 2:
         legacy_job_id = parts[0]
         resolved_job_dir = find_job_dir(legacy_job_id)
-        if resolved_job_dir != JOBS_DIR / legacy_job_id:
+        if resolved_job_dir != JOBS_DIR / legacy_job_id and resolved_job_dir != LEGACY_JOBS_DIR / legacy_job_id:
             return resolved_job_dir.joinpath(*parts[1:])
 
     return candidate
@@ -437,20 +490,20 @@ def persist_runtime_config(
 
 
 def iter_result_files() -> Iterable[Path]:
-    yield from JOBS_DIR.glob("*/result.json")
-    yield from JOBS_DIR.glob("*/*/result.json")
+    seen: set[Path] = set()
+    for root in job_storage_roots():
+        for pattern in ("*/result.json", "*/*/result.json"):
+            for result_file in root.glob(pattern):
+                resolved = result_file.resolve()
+                if resolved in seen:
+                    continue
+                seen.add(resolved)
+                yield result_file
 
 
 def clean_old_jobs(max_age_hours: int = 24) -> None:
-    JOBS_DIR.mkdir(parents=True, exist_ok=True)
-    cutoff = time.time() - max_age_hours * 3600
-    for result_file in list(iter_result_files()):
-        try:
-            job_dir = result_file.parent
-            if job_dir.is_dir() and result_file.stat().st_mtime < cutoff:
-                shutil.rmtree(job_dir)
-        except Exception:
-            pass
+    # 历史版本把分析任务当作临时缓存清理；现在它们是 datasets 下的一次标注资产，必须持久保留。
+    ensure_dataset_storage()
 
 
 def render_pdf_to_images(pdf_path: Path, job_id: str, job_dir: Path, dpi: int, max_pages: int) -> List[PageImage]:
@@ -839,13 +892,14 @@ def result_path(job_id: str) -> Path:
 
 
 def find_job_dir(job_id: str) -> Path:
-    legacy_dir = JOBS_DIR / job_id
-    if (legacy_dir / "result.json").exists():
-        return legacy_dir
-    matches = list(JOBS_DIR.glob(f"*/{job_id}/result.json"))
-    if matches:
-        return matches[0].parent
-    return legacy_dir
+    for root in job_storage_roots():
+        legacy_dir = root / job_id
+        if (legacy_dir / "result.json").exists():
+            return legacy_dir
+        matches = list(root.glob(f"*/{job_id}/result.json"))
+        if matches:
+            return matches[0].parent
+    return JOBS_DIR / job_id
 
 
 def read_job_result(job_id: str) -> Dict[str, Any]:
@@ -915,6 +969,603 @@ def list_job_summaries() -> List[Dict[str, Any]]:
         )
     items.sort(key=lambda item: item["updated_at"], reverse=True)
     return items
+
+
+def now_timestamp() -> str:
+    return time.strftime("%Y%m%d_%H%M%S", time.localtime())
+
+
+def iso_now() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime())
+
+
+def dataset_dir(job_id: str) -> Path:
+    return find_job_dir(job_id)
+
+
+def legacy_dataset_dir(job_id: str) -> Path:
+    return DATASETS_DIR / safe_path_name(job_id)
+
+
+def second_annotation_dir(job_id: str) -> Path:
+    return SECOND_ANNOTATIONS_DIR / safe_path_name(job_id)
+
+
+def first_annotation_path(job_id: str) -> Path:
+    return dataset_dir(job_id) / "annotations" / "first_annotation" / "annotation.json"
+
+
+def resolve_dataset_job_id(dataset_id: str) -> str:
+    candidate = str(dataset_id or "").strip()
+    if not candidate:
+        raise FileNotFoundError("missing dataset id")
+    if result_path(candidate).is_file():
+        return candidate
+    for item in list_job_summaries():
+        job_id = str(item.get("job_id") or "")
+        if candidate in {job_id, str(item.get("dataset_id") or ""), str(item.get("filename") or "")}:
+            return job_id
+    raise FileNotFoundError(f"dataset not found: {candidate}")
+
+
+def safe_path_name(value: str) -> str:
+    text = re.sub(r"[^A-Za-z0-9_.\-\u4e00-\u9fff]+", "_", str(value or "").strip())
+    return text.strip("._ ") or "dataset"
+
+
+def read_json_file(path: Path, default: Any) -> Any:
+    if not path.is_file():
+        return default
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def write_json_file(path: Path, payload: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp_path.replace(path)
+
+
+def dataset_state_path(job_id: str) -> Path:
+    return dataset_dir(job_id) / "dataset_state.json"
+
+
+def legacy_dataset_state_path(job_id: str) -> Path:
+    return legacy_dataset_dir(job_id) / "dataset_state.json"
+
+
+def default_dataset_state(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    created_at = int(result_path(job_id).stat().st_mtime) if result_path(job_id).exists() else int(time.time())
+    return {
+        "dataset_id": job_id,
+        "annotation_status": "first_annotated" if payload.get("status") == "complete" else "none",
+        "convert_status": "none",
+        "convert_error": "",
+        "converted_formats": [],
+        "first_annotated_at": created_at,
+        "second_annotated_at": None,
+        "updated_at": created_at,
+        "convert_records": [],
+    }
+
+
+def read_dataset_state(job_id: str, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    if payload is None:
+        payload = read_job_result(job_id)
+    state = read_json_file(dataset_state_path(job_id), None)
+    if not isinstance(state, dict):
+        state = read_json_file(legacy_dataset_state_path(job_id), None)
+    if not isinstance(state, dict):
+        state = default_dataset_state(job_id, payload)
+        write_dataset_state(job_id, state)
+    state.setdefault("dataset_id", job_id)
+    state.setdefault("annotation_status", "first_annotated" if payload.get("status") == "complete" else "none")
+    state.setdefault("convert_status", "none")
+    state.setdefault("convert_error", "")
+    state.setdefault("converted_formats", [])
+    state.setdefault("convert_records", [])
+    state.setdefault("first_annotated_at", int(result_path(job_id).stat().st_mtime) if result_path(job_id).exists() else None)
+    state.setdefault("second_annotated_at", None)
+    state.setdefault("updated_at", int(time.time()))
+    return state
+
+
+def write_dataset_state(job_id: str, state: Dict[str, Any]) -> None:
+    state["updated_at"] = int(time.time())
+    write_json_file(dataset_state_path(job_id), state)
+
+
+def dataset_summary(job_id: str, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    if payload is None:
+        payload = read_job_result(job_id)
+    state = read_dataset_state(job_id, payload)
+    pages = payload.get("pages", [])
+    blocks = payload.get("result", {}).get("blocks", [])
+    first_page_url = ""
+    if isinstance(pages, list) and pages and isinstance(pages[0], dict):
+        first_page_url = str(pages[0].get("image_url") or "")
+    return {
+        "dataset_id": job_id,
+        "job_id": job_id,
+        "filename": payload.get("filename") or "未知文件",
+        "model": result_model_name(payload),
+        "model_dir": payload.get("config", {}).get("model_dir") if isinstance(payload.get("config"), dict) else "",
+        "status": payload.get("status") or "complete",
+        "page_count": payload.get("page_count") or len(pages),
+        "completed_pages": payload.get("completed_pages") or count_finished_pages(pages),
+        "block_count": len(blocks) if isinstance(blocks, list) else 0,
+        "error_count": len(payload.get("errors", [])) if isinstance(payload.get("errors"), list) else 0,
+        "prompt_template": payload.get("prompt_template") if isinstance(payload.get("prompt_template"), dict) else {},
+        "first_page_url": first_page_url,
+        "updated_at": max(int(result_path(job_id).stat().st_mtime) if result_path(job_id).exists() else 0, int(state.get("updated_at") or 0)),
+        "annotation_status": state.get("annotation_status", "none"),
+        "convert_status": state.get("convert_status", "none"),
+        "convert_error": state.get("convert_error", ""),
+        "converted_formats": state.get("converted_formats", []),
+        "first_annotated_at": state.get("first_annotated_at"),
+        "second_annotated_at": state.get("second_annotated_at"),
+        "last_convert_record": (state.get("convert_records") or [None])[-1],
+    }
+
+
+def list_dataset_summaries() -> List[Dict[str, Any]]:
+    items: List[Dict[str, Any]] = []
+    # 以已经稳定使用的 job summary 为基准增强数据集状态，避免新数据集状态文件异常时漏掉旧标注结果。
+    for job in list_job_summaries():
+        job_id = str(job.get("job_id") or "")
+        if not job_id:
+            continue
+        try:
+            payload = read_job_result(job_id)
+            state = read_dataset_state(job_id, payload)
+            job.update(
+                {
+                    "dataset_id": job_id,
+                    "annotation_status": state.get("annotation_status", "none"),
+                    "convert_status": state.get("convert_status", "none"),
+                    "convert_error": state.get("convert_error", ""),
+                    "converted_formats": state.get("converted_formats", []),
+                    "first_annotated_at": state.get("first_annotated_at"),
+                    "second_annotated_at": state.get("second_annotated_at"),
+                    "last_convert_record": (state.get("convert_records") or [None])[-1],
+                }
+            )
+        except Exception as exc:
+            job.update(
+                {
+                    "dataset_id": job_id,
+                    "annotation_status": "first_annotated" if job.get("status") == "complete" else "none",
+                    "convert_status": "none",
+                    "convert_error": f"{type(exc).__name__}: {exc}",
+                    "converted_formats": [],
+                    "first_annotated_at": job.get("updated_at"),
+                    "second_annotated_at": None,
+                    "last_convert_record": None,
+                }
+            )
+        items.append(job)
+    items.sort(key=lambda item: item["updated_at"], reverse=True)
+    return items
+
+
+def annotation_file_for(job_id: str, version: str = "latest") -> Optional[Path]:
+    if version == "draft":
+        path = second_annotation_dir(job_id) / "draft.json"
+        if path.is_file():
+            return path
+        path = legacy_dataset_dir(job_id) / "annotations" / "second_annotation" / "draft.json"
+        return path if path.is_file() else None
+    if version == "second":
+        files = sorted(second_annotation_dir(job_id).glob("annotation_v2_*.json"))
+        if not files:
+            files = sorted((legacy_dataset_dir(job_id) / "annotations" / "second_annotation").glob("annotation_v2_*.json"))
+        return files[-1] if files else None
+    first = first_annotation_path(job_id)
+    if first.is_file():
+        return first
+    first = legacy_dataset_dir(job_id) / "annotations" / "first_annotation" / "annotation.json"
+    return first if first.is_file() else None
+
+
+def ensure_first_annotation(job_id: str, payload: Optional[Dict[str, Any]] = None) -> Path:
+    if payload is None:
+        payload = read_job_result(job_id)
+    target = first_annotation_path(job_id)
+    if not target.is_file():
+        write_json_file(target, build_annotation_payload(job_id, payload, "first_annotation"))
+    return target
+
+
+def build_annotation_payload(job_id: str, payload: Dict[str, Any], version: str, blocks_by_page: Optional[Dict[int, List[Dict[str, Any]]]] = None) -> Dict[str, Any]:
+    pages_out: List[Dict[str, Any]] = []
+    for page in payload.get("pages", []):
+        if not isinstance(page, dict):
+            continue
+        page_id = int(page.get("page_id") or 0)
+        raw_blocks = blocks_by_page.get(page_id, []) if blocks_by_page is not None else page.get("blocks", [])
+        pages_out.append(
+            {
+                "page_id": page_id,
+                "image_url": page.get("image_url", ""),
+                "width": page.get("width", 0),
+                "height": page.get("height", 0),
+                "blocks": [normalize_annotation_block(block, page_id) for block in raw_blocks if isinstance(block, dict)],
+            }
+        )
+    return {
+        "dataset_id": job_id,
+        "job_id": job_id,
+        "filename": payload.get("filename") or "",
+        "version": version,
+        "updated_at": iso_now(),
+        "label_types": sorted(DATASET_LABEL_TYPES),
+        "pages": pages_out,
+    }
+
+
+def normalize_annotation_block(block: Dict[str, Any], page_id: int) -> Dict[str, Any]:
+    label = str(block.get("label") or block.get("block_type") or block.get("type") or "text")
+    if label not in DATASET_LABEL_TYPES:
+        label = "other"
+    source = str(block.get("source") or "model")
+    modified_fields = block.get("modified_fields")
+    if not isinstance(modified_fields, list):
+        modified_fields = []
+    bbox = block.get("bbox")
+    if not isinstance(bbox, list) or len(bbox) != 4:
+        bbox = [0, 0, 1, 1]
+    return {
+        "id": str(block.get("id") or f"p{page_id:03d}_b{uuid.uuid4().hex[:8]}"),
+        "bbox": [int(float(v)) for v in bbox],
+        "label": label,
+        "block_type": label,
+        "text": str(block.get("text") or ""),
+        "page_id": int(block.get("page_id") if block.get("page_id") is not None else page_id),
+        "source": source,
+        "modified": bool(block.get("modified", source == "manual")),
+        "modified_fields": modified_fields,
+        "updated_at": block.get("updated_at") or iso_now(),
+        "updated_by": block.get("updated_by") or "",
+        "weak_heading": bool(block.get("weak_heading", block.get("weakHeading", False))),
+        "level": block.get("level") if block.get("level") in {"H1", "H2", "H3"} else None,
+    }
+
+
+def read_annotation_payload(job_id: str) -> Dict[str, Any]:
+    job_id = resolve_dataset_job_id(job_id)
+    payload = read_job_result(job_id)
+    ensure_first_annotation(job_id, payload)
+    second = annotation_file_for(job_id, "second")
+    draft = annotation_file_for(job_id, "draft")
+    source = draft or second or annotation_file_for(job_id, "first")
+    annotation = read_json_file(source, {}) if source else {}
+    if not isinstance(annotation, dict) or not annotation.get("pages"):
+        annotation = build_annotation_payload(job_id, payload, "first_annotation")
+    state = read_dataset_state(job_id, payload)
+    annotation["state"] = state
+    annotation["label_types"] = sorted(DATASET_LABEL_TYPES)
+    annotation["active_version"] = "draft" if draft else "second_annotation" if second else "first_annotation"
+    return annotation
+
+
+def save_second_annotation(job_id: str, body: Dict[str, Any], mode: str) -> Dict[str, Any]:
+    job_id = resolve_dataset_job_id(job_id)
+    payload = read_job_result(job_id)
+    pages = body.get("pages")
+    if not isinstance(pages, list):
+        raise ValueError("missing pages")
+    blocks_by_page: Dict[int, List[Dict[str, Any]]] = {}
+    for page in pages:
+        if not isinstance(page, dict):
+            continue
+        page_id = int(page.get("page_id") or 0)
+        blocks_by_page[page_id] = [normalize_annotation_block(block, page_id) for block in page.get("blocks", []) if isinstance(block, dict)]
+
+    # 保存二次标注时始终生成完整页面快照，避免草稿只保存当前页造成数据丢失。
+    annotation = build_annotation_payload(job_id, payload, "second_annotation", blocks_by_page)
+    annotation["updated_at"] = iso_now()
+    if mode == "draft":
+        target = second_annotation_dir(job_id) / "draft.json"
+        state = read_dataset_state(job_id, payload)
+        state["annotation_status"] = "second_annotating"
+        write_dataset_state(job_id, state)
+    elif mode == "overwrite":
+        target = first_annotation_path(job_id)
+        overwrite_job_blocks(job_id, payload, annotation)
+        state = read_dataset_state(job_id, payload)
+        state["annotation_status"] = "first_annotated"
+        write_dataset_state(job_id, state)
+    else:
+        target = second_annotation_dir(job_id) / f"annotation_v2_{now_timestamp()}.json"
+        state = read_dataset_state(job_id, payload)
+        state["annotation_status"] = "second_annotated"
+        state["second_annotated_at"] = int(time.time())
+        write_dataset_state(job_id, state)
+    write_json_file(target, annotation)
+    return {"ok": True, "dataset_id": job_id, "path": str(target), "state": read_dataset_state(job_id, payload)}
+
+
+def overwrite_job_blocks(job_id: str, payload: Dict[str, Any], annotation: Dict[str, Any]) -> None:
+    blocks: List[Dict[str, Any]] = []
+    pages_by_id = {int(page.get("page_id") or 0): page for page in annotation.get("pages", []) if isinstance(page, dict)}
+    for page in payload.get("pages", []):
+        if not isinstance(page, dict):
+            continue
+        page_id = int(page.get("page_id") or 0)
+        next_page = pages_by_id.get(page_id)
+        if not next_page:
+            continue
+        page_blocks = [job_block_from_annotation(block) for block in next_page.get("blocks", []) if isinstance(block, dict)]
+        page["blocks"] = page_blocks
+        blocks.extend(page_blocks)
+    payload.setdefault("result", {})["blocks"] = blocks
+    # 覆盖保存会写回一次标注结果，这是高风险操作，前端已做二次确认。
+    write_job_result(job_id, payload)
+
+
+def job_block_from_annotation(block: Dict[str, Any]) -> Dict[str, Any]:
+    label = str(block.get("label") or block.get("block_type") or "text")
+    return {
+        "id": block.get("id"),
+        "text": block.get("text", ""),
+        "bbox": block.get("bbox", [0, 0, 1, 1]),
+        "page_id": block.get("page_id", 0),
+        "block_type": label if label in BLOCK_TYPES else "text",
+        "weak_heading": bool(block.get("weak_heading", False)),
+        "level": block.get("level") if block.get("level") in {"H1", "H2", "H3"} else None,
+    }
+
+
+def start_convert_task(body: Dict[str, Any]) -> Dict[str, Any]:
+    dataset_ids = body.get("dataset_ids")
+    if not isinstance(dataset_ids, list) or not dataset_ids:
+        raise ValueError("missing dataset_ids")
+    target_format = str(body.get("target_format") or "").strip()
+    if target_format not in {"llamafactory", "swift"}:
+        raise ValueError("target_format must be llamafactory or swift")
+    merge = bool(body.get("merge", False))
+    split_type = str(body.get("split_type") or "train")
+    if split_type not in {"train", "val", "test", "all"}:
+        raise ValueError("split_type must be train, val, test, or all")
+    output_name = safe_path_name(str(body.get("output_name") or default_convert_output_name(target_format, merge)))
+    overwrite = bool(body.get("overwrite", False))
+
+    resolved_dataset_ids = [resolve_dataset_job_id(str(dataset_id)) for dataset_id in dataset_ids]
+
+    for dataset_id in resolved_dataset_ids:
+        payload = read_job_result(str(dataset_id))
+        if payload.get("status") != "complete":
+            raise ValueError(f"dataset {dataset_id} is not ready: {payload.get('status')}")
+        state = read_dataset_state(str(dataset_id), payload)
+        if state.get("annotation_status") not in {"first_annotated", "second_annotated"}:
+            raise ValueError(f"dataset {dataset_id} annotation_status is {state.get('annotation_status')}")
+
+    task_id = uuid.uuid4().hex[:12]
+    task = {
+        "task_id": task_id,
+        "status": "converting",
+        "target_format": target_format,
+        "dataset_ids": resolved_dataset_ids,
+        "output_path": "",
+        "message": "转换任务已创建",
+        "error": "",
+        "skipped_samples": 0,
+        "created_at": iso_now(),
+    }
+    CONVERT_TASKS[task_id] = task
+    for dataset_id in resolved_dataset_ids:
+        state = read_dataset_state(str(dataset_id))
+        state["convert_status"] = "converting"
+        state["convert_error"] = ""
+        write_dataset_state(str(dataset_id), state)
+
+    worker = threading.Thread(
+        target=run_convert_task,
+        args=(task_id, resolved_dataset_ids, target_format, merge, split_type, output_name, overwrite),
+        daemon=True,
+    )
+    worker.start()
+    return task
+
+
+def default_convert_output_name(target_format: str, merge: bool) -> str:
+    prefix = "merged_" if merge else ""
+    middle = "swift" if target_format == "swift" else "llamafactory"
+    return f"{prefix}{middle}_{now_timestamp()}"
+
+
+def run_convert_task(task_id: str, dataset_ids: List[str], target_format: str, merge: bool, split_type: str, output_name: str, overwrite: bool) -> None:
+    task = CONVERT_TASKS[task_id]
+    logs: List[str] = []
+    output_dir: Optional[Path] = None
+    skipped = 0
+    try:
+        output_dir = resolve_convert_output_dir(dataset_ids, target_format, merge, output_name)
+        if output_dir.exists() and not overwrite:
+            raise FileExistsError(f"输出路径已存在: {output_dir}")
+        if output_dir.exists() and overwrite:
+            shutil.rmtree(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        samples: List[Dict[str, Any]] = []
+        for dataset_id in dataset_ids:
+            try:
+                payload = read_job_result(dataset_id)
+                ensure_first_annotation(dataset_id, payload)
+                annotation = read_annotation_payload(dataset_id)
+                dataset_samples, dataset_skipped = samples_from_annotation(dataset_id, payload, annotation, target_format, output_dir)
+                logs.append(f"{dataset_id}: converted {len(dataset_samples)} samples, skipped {dataset_skipped}")
+                samples.extend(dataset_samples)
+                skipped += dataset_skipped
+            except Exception as exc:
+                logs.append(f"{dataset_id}: failed: {type(exc).__name__}: {exc}")
+                skipped += 1
+
+        if not samples:
+            raise ValueError("没有可转换样本")
+
+        split_files = write_split_files(output_dir, samples, split_type)
+        write_dataset_info(output_dir, target_format, split_files)
+        config = {
+            "source_datasets": dataset_ids,
+            "target_format": target_format,
+            "merge": merge,
+            "split_type": split_type,
+            "created_at": iso_now(),
+            "operator": "",
+            "output_path": str(output_dir),
+            "script_version": "markhub-converter-v2",
+        }
+        write_json_file(output_dir / "convert_config.json", config)
+        (output_dir / "convert_log.txt").write_text("\n".join(logs) + f"\nskipped_samples={skipped}\n", encoding="utf-8")
+
+        status = "partial_success" if skipped else "success"
+        task.update({"status": status, "output_path": str(output_dir), "message": "转换完成", "skipped_samples": skipped})
+        for dataset_id in dataset_ids:
+            state = read_dataset_state(dataset_id)
+            state["convert_status"] = status
+            state["convert_error"] = ""
+            formats = set(state.get("converted_formats") or [])
+            formats.add(target_format)
+            state["converted_formats"] = sorted(formats)
+            state.setdefault("convert_records", []).append(
+                {
+                    "task_id": task_id,
+                    "target_format": target_format,
+                    "status": status,
+                    "output_path": str(output_dir),
+                    "created_at": config["created_at"],
+                    "skipped_samples": skipped,
+                }
+            )
+            write_dataset_state(dataset_id, state)
+    except Exception as exc:
+        error = f"{type(exc).__name__}: {exc}"
+        task.update({"status": "failed", "error": error, "message": "转换失败", "skipped_samples": skipped})
+        if output_dir:
+            output_dir.mkdir(parents=True, exist_ok=True)
+            (output_dir / "convert_log.txt").write_text("\n".join(logs + [error]), encoding="utf-8")
+        for dataset_id in dataset_ids:
+            try:
+                state = read_dataset_state(dataset_id)
+                state["convert_status"] = "failed"
+                state["convert_error"] = error
+                state.setdefault("convert_records", []).append(
+                    {
+                        "task_id": task_id,
+                        "target_format": target_format,
+                        "status": "failed",
+                        "output_path": str(output_dir or ""),
+                        "created_at": iso_now(),
+                        "error": error,
+                        "skipped_samples": skipped,
+                    }
+                )
+                write_dataset_state(dataset_id, state)
+            except Exception:
+                pass
+
+
+def resolve_convert_output_dir(dataset_ids: List[str], target_format: str, merge: bool, output_name: str) -> Path:
+    root = SWIFT_DATASETS_DIR if target_format == "swift" else LLAMAFACTORY_DATASETS_DIR
+    return root / safe_path_name(output_name)
+
+
+def samples_from_annotation(dataset_id: str, payload: Dict[str, Any], annotation: Dict[str, Any], target_format: str, output_dir: Path) -> Tuple[List[Dict[str, Any]], int]:
+    samples: List[Dict[str, Any]] = []
+    skipped = 0
+    for page in annotation.get("pages", []):
+        try:
+            if not isinstance(page, dict):
+                skipped += 1
+                continue
+            blocks = [normalize_export_block(block) for block in page.get("blocks", []) if isinstance(block, dict)]
+            if not blocks:
+                skipped += 1
+                continue
+            source_image = image_path_from_page_url(dataset_id, str(page.get("image_url") or ""))
+            if not source_image or not source_image.is_file():
+                raise FileNotFoundError(f"image not found for page {page.get('page_id')}")
+            target_image = output_dir / "images" / safe_path_name(dataset_id) / source_image.name
+            target_image.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source_image, target_image)
+            image_ref = str(target_image.resolve())
+            answer = json.dumps({"image_path": image_ref, "blocks": blocks, "context_before": "", "context_after": ""}, ensure_ascii=False, separators=(",", ":"))
+            if target_format == "swift":
+                samples.append(
+                    {
+                        "messages": [
+                            {"role": "system", "content": "你是一个专业的文档版面分析模型。"},
+                            {"role": "user", "content": DEFAULT_SWIFT_USER_PROMPT},
+                            {"role": "assistant", "content": answer},
+                        ],
+                        "images": [image_ref],
+                    }
+                )
+            else:
+                samples.append(
+                    {
+                        "instruction": DEFAULT_LLAMAFACTORY_INSTRUCTION,
+                        "input": "",
+                        "output": answer,
+                        "images": [image_ref],
+                    }
+                )
+        except Exception:
+            skipped += 1
+    return samples, skipped
+
+
+DEFAULT_SWIFT_USER_PROMPT = "<image>\n请识别图片中的所有主要版面块，并按照阅读顺序输出严格合法的 JSON。"
+DEFAULT_LLAMAFACTORY_INSTRUCTION = "<image>\n请识别图片中的所有主要版面块，并按照阅读顺序输出严格合法的 JSON。"
+
+
+def image_path_from_page_url(dataset_id: str, image_url: str) -> Optional[Path]:
+    if image_url.startswith("/jobs/"):
+        return job_asset_path(image_url.removeprefix("/jobs/"))
+    job_dir = find_job_dir(dataset_id)
+    candidate = job_dir / image_url.lstrip("/")
+    return candidate if candidate.exists() else None
+
+
+def normalize_export_block(block: Dict[str, Any]) -> Dict[str, Any]:
+    label = str(block.get("label") or block.get("block_type") or "text")
+    return {
+        "id": str(block.get("id") or ""),
+        "text": str(block.get("text") or ""),
+        "bbox": block.get("bbox") if isinstance(block.get("bbox"), list) else [0, 0, 1, 1],
+        "page_id": int(block.get("page_id") or 0),
+        "block_type": label,
+        "weak_heading": bool(block.get("weak_heading", False)),
+        "level": block.get("level") if block.get("level") in {"H1", "H2", "H3"} else None,
+    }
+
+
+def write_split_files(output_dir: Path, samples: List[Dict[str, Any]], split_type: str) -> List[str]:
+    file_names: List[str] = []
+    if split_type == "all":
+        split_map = {"train.jsonl": samples}
+    else:
+        split_map = {f"{split_type}.jsonl": samples}
+    for file_name, split_samples in split_map.items():
+        with (output_dir / file_name).open("w", encoding="utf-8") as f:
+            for sample in split_samples:
+                f.write(json.dumps(sample, ensure_ascii=False) + "\n")
+        file_names.append(file_name)
+    return file_names
+
+
+def write_dataset_info(output_dir: Path, target_format: str, split_files: List[str]) -> None:
+    info = {
+        "format": target_format,
+        "files": split_files,
+        "columns": (
+            {"messages": "messages", "images": "images"}
+            if target_format == "swift"
+            else {"prompt": "instruction", "query": "input", "response": "output", "images": "images"}
+        ),
+    }
+    write_json_file(output_dir / "dataset_info.json", info)
 
 
 def count_finished_pages(pages: Iterable[Dict[str, Any]]) -> int:
@@ -1059,6 +1710,35 @@ class LayoutAnalyzerHandler(BaseHTTPRequestHandler):
         if path == "/api/jobs":
             self.write_json({"jobs": list_job_summaries()})
             return
+        if path == "/api/datasets":
+            self.write_json({"datasets": list_dataset_summaries()})
+            return
+        convert_match = re.fullmatch(r"/api/datasets/convert/([A-Za-z0-9_-]+)", path)
+        if convert_match:
+            task_id = convert_match.group(1)
+            task = CONVERT_TASKS.get(task_id)
+            if not task:
+                self.write_json({"error": "convert task not found"}, status=HTTPStatus.NOT_FOUND)
+            else:
+                self.write_json(task)
+            return
+        annotation_match = re.fullmatch(r"/api/datasets/([A-Za-z0-9_-]+)/annotations", path)
+        if annotation_match:
+            try:
+                self.write_json(read_annotation_payload(annotation_match.group(1)))
+            except FileNotFoundError:
+                self.write_json({"error": "dataset not found"}, status=HTTPStatus.NOT_FOUND)
+            except Exception as exc:
+                self.write_json({"error": f"{type(exc).__name__}: {exc}"}, status=HTTPStatus.BAD_REQUEST)
+            return
+        records_match = re.fullmatch(r"/api/datasets/([A-Za-z0-9_-]+)/convert-records", path)
+        if records_match:
+            try:
+                state = read_dataset_state(records_match.group(1))
+                self.write_json({"records": state.get("convert_records", [])})
+            except FileNotFoundError:
+                self.write_json({"error": "dataset not found"}, status=HTTPStatus.NOT_FOUND)
+            return
         job_match = re.fullmatch(r"/api/jobs/([A-Za-z0-9_-]+)/result", path)
         if job_match:
             try:
@@ -1068,6 +1748,9 @@ class LayoutAnalyzerHandler(BaseHTTPRequestHandler):
             return
         if path.startswith("/jobs/"):
             self.serve_file(job_asset_path(path.removeprefix("/jobs/")))
+            return
+        if path.startswith("/datasets/"):
+            self.serve_file(DATASETS_DIR / path.removeprefix("/datasets/"))
             return
         if path == "/" or path == "/index.html":
             self.serve_file(STATIC_DIR / "index.html")
@@ -1083,26 +1766,56 @@ class LayoutAnalyzerHandler(BaseHTTPRequestHandler):
             return
         job_id = job_match.group(1)
         job_dir = find_job_dir(job_id).resolve()
-        if not str(job_dir).startswith(str(JOBS_DIR.resolve())) or not job_dir.is_dir():
+        if not any(str(job_dir).startswith(str(root.resolve())) for root in job_storage_roots()) or not job_dir.is_dir():
             self.write_json({"error": "job not found"}, status=HTTPStatus.NOT_FOUND)
             return
         try:
             shutil.rmtree(job_dir)
+            shutil.rmtree(second_annotation_dir(job_id), ignore_errors=True)
             self.write_json({"ok": True, "job_id": job_id})
         except Exception as exc:
             self.write_json({"error": f"{type(exc).__name__}: {exc}"}, status=HTTPStatus.BAD_REQUEST)
 
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
+        if parsed.path == "/api/datasets/convert":
+            try:
+                self.write_json(start_convert_task(self.read_json_body()))
+            except Exception as exc:
+                traceback.print_exc()
+                self.write_json({"error": f"{type(exc).__name__}: {exc}"}, status=HTTPStatus.BAD_REQUEST)
+            return
+        draft_match = re.fullmatch(r"/api/datasets/([A-Za-z0-9_-]+)/annotations/second/draft", parsed.path)
+        if draft_match:
+            try:
+                self.write_json(save_second_annotation(draft_match.group(1), self.read_json_body(), "draft"))
+            except Exception as exc:
+                traceback.print_exc()
+                self.write_json({"error": f"{type(exc).__name__}: {exc}"}, status=HTTPStatus.BAD_REQUEST)
+            return
+        submit_match = re.fullmatch(r"/api/datasets/([A-Za-z0-9_-]+)/annotations/second/submit", parsed.path)
+        if submit_match:
+            try:
+                self.write_json(save_second_annotation(submit_match.group(1), self.read_json_body(), "submit"))
+            except Exception as exc:
+                traceback.print_exc()
+                self.write_json({"error": f"{type(exc).__name__}: {exc}"}, status=HTTPStatus.BAD_REQUEST)
+            return
+        overwrite_match = re.fullmatch(r"/api/datasets/([A-Za-z0-9_-]+)/annotations/overwrite", parsed.path)
+        if overwrite_match:
+            try:
+                self.write_json(save_second_annotation(overwrite_match.group(1), self.read_json_body(), "overwrite"))
+            except Exception as exc:
+                traceback.print_exc()
+                self.write_json({"error": f"{type(exc).__name__}: {exc}"}, status=HTTPStatus.BAD_REQUEST)
+            return
+
         template_match = re.fullmatch(r"/api/prompt-templates/([A-Za-z0-9_-]+)", parsed.path)
         if template_match:
             try:
                 payload = self.read_json_body()
                 template_id = normalize_prompt_template_id(template_match.group(1))
-                existing = PROMPT_TEMPLATES.get(template_id)
-                if not existing:
-                    self.write_json({"error": "prompt template not found"}, status=HTTPStatus.NOT_FOUND)
-                    return
+                existing = PROMPT_TEMPLATES.get(template_id, {})
                 name = clean_text(payload.get("name"), str(existing.get("name") or template_id))
                 category = clean_text(payload.get("category"), str(existing.get("category") or "layout"))
                 if category not in PROMPT_TEMPLATE_CATEGORIES:
@@ -1184,7 +1897,9 @@ class LayoutAnalyzerHandler(BaseHTTPRequestHandler):
     def serve_file(self, path: Path) -> None:
         try:
             real = path.resolve()
-            allowed_roots = [STATIC_DIR.resolve(), JOBS_DIR.resolve()]
+            allowed_roots = [STATIC_DIR.resolve(), DATASETS_DIR.resolve()]
+            if LEGACY_JOBS_DIR.exists():
+                allowed_roots.append(LEGACY_JOBS_DIR.resolve())
             if not any(str(real).startswith(str(root)) for root in allowed_roots):
                 self.send_error(HTTPStatus.FORBIDDEN, "Forbidden")
                 return
@@ -1260,7 +1975,7 @@ def main() -> int:
     parser.add_argument("--port", type=int, default=8787)
     args = parser.parse_args()
 
-    JOBS_DIR.mkdir(parents=True, exist_ok=True)
+    ensure_dataset_storage()
     server = ThreadingHTTPServer((args.host, args.port), LayoutAnalyzerHandler)
     print(f"Layout Analyzer running at http://{args.host}:{args.port}")
     print(f"LLM_BASE_URL={env_config()['base_url']}")

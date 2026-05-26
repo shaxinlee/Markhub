@@ -23,6 +23,7 @@ export interface Project {
 }
 
 export interface BackendJobSummary {
+  dataset_id?: string;
   job_id: string;
   filename: string;
   model?: string;
@@ -38,6 +39,21 @@ export interface BackendJobSummary {
     id?: string;
     name?: string;
   };
+  annotation_status?: 'none' | 'first_annotated' | 'second_annotating' | 'second_annotated';
+  convert_status?: 'none' | 'converting' | 'success' | 'failed' | 'partial_success';
+  convert_error?: string;
+  converted_formats?: string[];
+  first_annotated_at?: number | null;
+  second_annotated_at?: number | null;
+  last_convert_record?: {
+    task_id?: string;
+    target_format?: string;
+    status?: string;
+    output_path?: string;
+    created_at?: string;
+    error?: string;
+    skipped_samples?: number;
+  } | null;
 }
 
 export type AnnotationFeature = 'bounding_box' | 'polygon' | 'layout' | 'keypoints' | 'text_transcription';
@@ -56,7 +72,9 @@ export type BackendBlockType =
   | 'table'
   | 'figure_title'
   | 'image'
-  | 'vision_footnote';
+  | 'vision_footnote'
+  | 'handwriting'
+  | 'seal';
 
 export interface AnnotationSegment {
   id: string;

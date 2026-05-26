@@ -9,13 +9,15 @@ import { AnnotationFeature, BackendJobSummary, Project, Collaborator, PromptTemp
 import Dashboard from './components/Dashboard';
 import DatasetsPage from './components/DatasetsPage';
 import Workspace from './components/Workspace';
+import SecondAnnotationWorkspace from './components/SecondAnnotationWorkspace';
 import GlowBackground from './components/GlowBackground';
 import { motion, AnimatePresence } from 'motion/react';
 
 export default function App() {
   // Screen views: 'dashboard' or 'workspace'
-  const [activeScreen, setActiveScreen] = useState<'dashboard' | 'workspace'>('dashboard');
+  const [activeScreen, setActiveScreen] = useState<'dashboard' | 'workspace' | 'secondAnnotation'>('dashboard');
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
+  const [selectedDatasetId, setSelectedDatasetId] = useState<string | null>(null);
   const [language, setLanguage] = useState<'zh-CN'>('zh-CN');
 
   const [jobs, setJobs] = useState<BackendJobSummary[]>([]);
@@ -64,7 +66,7 @@ export default function App() {
   // active Navbar header selection
   const [activeHeaderTab, setActiveHeaderTab] = useState<'projects' | 'datasets' | 'analytics' | 'team' | 'settings'>('projects');
   const isDatasetsPage = activeScreen === 'dashboard' && activeHeaderTab === 'datasets';
-  const isWorkspace = activeScreen === 'workspace';
+  const isWorkspace = activeScreen === 'workspace' || activeScreen === 'secondAnnotation';
 
   useEffect(() => {
     document.documentElement.lang = language;
@@ -78,10 +80,7 @@ export default function App() {
 
   const loadRealDatasets = async () => {
     try {
-      const response = await fetch('/api/jobs', { cache: 'no-store' });
-      const payload = await response.json();
-      if (!response.ok || payload.error) throw new Error(payload.error || `HTTP ${response.status}`);
-      const backendJobs: BackendJobSummary[] = payload.jobs || [];
+      const backendJobs = await fetchDatasetSummaries();
       const realProjects = backendJobs.map(mapJobToProject);
       setJobs(backendJobs);
       setProjects(realProjects);
@@ -95,6 +94,27 @@ export default function App() {
       setJobs([]);
       setProjects([]);
       setStats({ totalImages: 0, totalAnnotations: '0', activeCollaborators: 0 });
+    }
+  };
+
+  const fetchDatasetSummaries = async (): Promise<BackendJobSummary[]> => {
+    try {
+      const response = await fetch('/api/datasets', { cache: 'no-store' });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload.error) throw new Error(payload.error || `HTTP ${response.status}`);
+      return payload.datasets || payload.jobs || [];
+    } catch (datasetError) {
+      console.warn('Falling back to legacy /api/jobs dataset list:', datasetError);
+      const response = await fetch('/api/jobs', { cache: 'no-store' });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload.error) throw new Error(payload.error || `HTTP ${response.status}`);
+      return (payload.jobs || []).map((job: BackendJobSummary) => ({
+        ...job,
+        dataset_id: job.dataset_id || job.job_id,
+        annotation_status: isCompleteBackendJob(job.status) ? 'first_annotated' : 'none',
+        convert_status: 'none',
+        converted_formats: [],
+      }));
     }
   };
 
@@ -121,7 +141,12 @@ export default function App() {
     const payload = await response.json();
     if (!response.ok || payload.error) throw new Error(payload.error || `HTTP ${response.status}`);
     const savedTemplate: PromptTemplateOption = normalizePromptTemplates([payload.prompt_template])[0];
-    setPromptTemplates((current) => current.map((item) => item.id === savedTemplate.id ? savedTemplate : item));
+    setPromptTemplates((current) => {
+      const exists = current.some((item) => item.id === savedTemplate.id);
+      return exists
+        ? current.map((item) => item.id === savedTemplate.id ? savedTemplate : item)
+        : [...current, savedTemplate];
+    });
     return savedTemplate;
   };
 
@@ -165,6 +190,11 @@ export default function App() {
     }
     setSelectedProject(targetProject);
     setActiveScreen('workspace');
+  };
+
+  const handleOpenSecondAnnotation = (datasetId: string) => {
+    setSelectedDatasetId(datasetId);
+    setActiveScreen('secondAnnotation');
   };
 
   // Workspace completion updates
@@ -293,6 +323,8 @@ export default function App() {
                     onNavigate={setActiveHeaderTab}
                     onCreateDataset={handleOpenAnnotationFeature}
                     onOpenDataset={handleOpenDataset}
+                    onSecondAnnotate={handleOpenSecondAnnotation}
+                    onRefreshDatasets={loadRealDatasets}
                   />
                 ) : activeHeaderTab === 'settings' ? (
                   <SettingsPage
@@ -312,7 +344,7 @@ export default function App() {
                   />
                 )}
               </motion.div>
-            ) : (
+            ) : activeScreen === 'workspace' ? (
               selectedProject && (
                 <motion.div
                   key="workspace-view"
@@ -331,6 +363,26 @@ export default function App() {
                     }}
                     onUpdateProjectProgress={handleUpdateProjectProgress}
                     onIncreaseAnnotationsCount={handleIncreaseAnnotations}
+                  />
+                </motion.div>
+              )
+            ) : (
+              selectedDatasetId && (
+                <motion.div
+                  key="second-annotation-view"
+                  initial={{ opacity: 0, filter: 'blur(3px)' }}
+                  animate={{ opacity: 1, filter: 'blur(0px)' }}
+                  exit={{ opacity: 0, filter: 'blur(3px)' }}
+                  transition={{ duration: 0.2 }}
+                  className="flex flex-1 overflow-hidden w-full h-full"
+                >
+                  <SecondAnnotationWorkspace
+                    datasetId={selectedDatasetId}
+                    onGoBack={() => {
+                      setActiveScreen('dashboard');
+                      setSelectedDatasetId(null);
+                      loadRealDatasets();
+                    }}
                   />
                 </motion.div>
               )
@@ -491,6 +543,7 @@ interface PromptTemplateManagerProps {
 function PromptTemplateManager({ promptTemplates, onSavePromptTemplate }: PromptTemplateManagerProps) {
   const [activeCategory, setActiveCategory] = useState<AnnotationFeature>('layout');
   const [selectedTemplateId, setSelectedTemplateId] = useState('default_template_1');
+  const [draftName, setDraftName] = useState('');
   const [draftPrompt, setDraftPrompt] = useState('');
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState('');
@@ -506,17 +559,39 @@ function PromptTemplateManager({ promptTemplates, onSavePromptTemplate }: Prompt
   }, [activeCategory, categoryTemplates, selectedTemplateId]);
 
   useEffect(() => {
+    setDraftName(selectedTemplate?.name || '');
     setDraftPrompt(selectedTemplate?.prompt || '');
     setSaveState('idle');
     setErrorMessage('');
-  }, [selectedTemplate?.id, selectedTemplate?.prompt]);
+  }, [selectedTemplate?.id, selectedTemplate?.name, selectedTemplate?.prompt]);
 
   const handleSave = async () => {
     if (!selectedTemplate || saveState === 'saving') return;
     setSaveState('saving');
     setErrorMessage('');
     try {
-      await onSavePromptTemplate({ ...selectedTemplate, prompt: draftPrompt });
+      await onSavePromptTemplate({ ...selectedTemplate, name: draftName.trim() || selectedTemplate.name, prompt: draftPrompt });
+      setSaveState('saved');
+    } catch (error) {
+      setSaveState('error');
+      setErrorMessage(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const handleCreateTemplate = async () => {
+    if (!activeMeta.available || saveState === 'saving') return;
+    const nextIndex = categoryTemplates.length + 1;
+    const newTemplate: PromptTemplateOption = {
+      id: `${activeCategory}_template_${Date.now()}`,
+      name: `${activeMeta.label} 模板 ${nextIndex}`,
+      category: activeCategory,
+      prompt: selectedTemplate?.prompt || draftPrompt,
+    };
+    setSaveState('saving');
+    setErrorMessage('');
+    try {
+      const saved = await onSavePromptTemplate(newTemplate);
+      setSelectedTemplateId(saved.id);
       setSaveState('saved');
     } catch (error) {
       setSaveState('error');
@@ -576,16 +651,39 @@ function PromptTemplateManager({ promptTemplates, onSavePromptTemplate }: Prompt
                   <span className="text-[10px] uppercase tracking-[0.25em] text-white/35 font-mono">{activeMeta.label}</span>
                   <h3 className="mt-2 font-serif italic text-xl text-white">{selectedTemplate.name}</h3>
                 </div>
-                <select
-                  value={selectedTemplate.id}
-                  onChange={(event) => setSelectedTemplateId(event.target.value)}
-                  className="bg-[#141414] border border-white/10 rounded-none px-3 py-2 text-xs text-white focus:outline-none focus:border-white/30"
-                >
-                  {categoryTemplates.map((template) => (
-                    <option key={template.id} value={template.id}>{template.name}</option>
-                  ))}
-                </select>
+                <div className="flex flex-col gap-2 md:min-w-[280px]">
+                  <select
+                    value={selectedTemplate.id}
+                    onChange={(event) => setSelectedTemplateId(event.target.value)}
+                    className="bg-[#141414] border border-white/10 rounded-none px-3 py-2 text-xs text-white focus:outline-none focus:border-white/30"
+                  >
+                    {categoryTemplates.map((template) => (
+                      <option key={template.id} value={template.id}>{template.name}</option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={handleCreateTemplate}
+                    disabled={!activeMeta.available || saveState === 'saving'}
+                    className="border border-white/10 bg-white/[0.03] px-3 py-2 text-[10px] font-bold uppercase tracking-[0.16em] text-white/70 transition-colors hover:bg-white/[0.08] hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    新建当前提示词副本
+                  </button>
+                </div>
               </div>
+
+              <label htmlFor="promptTemplateName" className="mb-2 block text-[10px] uppercase tracking-wider font-bold text-white/45">
+                Template Name
+              </label>
+              <input
+                id="promptTemplateName"
+                value={draftName}
+                onChange={(event) => {
+                  setDraftName(event.target.value);
+                  setSaveState('idle');
+                }}
+                className="mb-4 w-full bg-black/20 border border-white/10 rounded-none px-4 py-2.5 text-xs text-white/80 outline-none focus:border-white/30"
+              />
 
               <label htmlFor="promptTemplateEditor" className="mb-2 block text-[10px] uppercase tracking-wider font-bold text-white/45">
                 Prompt Content
@@ -679,6 +777,11 @@ function normalizePromptTemplates(items: unknown[]): PromptTemplateOption[] {
       category: (item.category || 'layout') as AnnotationFeature,
       prompt: typeof item.prompt === 'string' ? item.prompt : '',
     }));
+}
+
+function isCompleteBackendJob(status: string): boolean {
+  const normalized = String(status || '').toLowerCase();
+  return normalized === 'complete' || normalized === 'completed' || normalized === 'done';
 }
 
 function formatCount(value: number): string {

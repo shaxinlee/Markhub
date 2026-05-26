@@ -109,7 +109,9 @@ const BLOCK_TYPES: BackendBlockType[] = [
   'table',
   'figure_title',
   'image',
-  'vision_footnote'
+  'vision_footnote',
+  'handwriting',
+  'seal'
 ];
 
 const BLOCK_TYPE_LABELS: Record<BackendBlockType, string> = {
@@ -119,7 +121,9 @@ const BLOCK_TYPE_LABELS: Record<BackendBlockType, string> = {
   table: 'Table',
   figure_title: 'Figure Title',
   image: 'Image',
-  vision_footnote: 'Footnote'
+  vision_footnote: 'Footnote',
+  handwriting: 'Handwriting',
+  seal: 'Seal'
 };
 
 const DEFAULT_VISIBLE_TYPES: Record<BackendBlockType, boolean> = {
@@ -129,7 +133,9 @@ const DEFAULT_VISIBLE_TYPES: Record<BackendBlockType, boolean> = {
   table: true,
   figure_title: true,
   image: true,
-  vision_footnote: true
+  vision_footnote: true,
+  handwriting: true,
+  seal: true
 };
 
 export default function Workspace({
@@ -322,6 +328,8 @@ export default function Workspace({
       case 'figure_title': return { border: '#F59E0B', bg: 'rgba(245, 158, 11, 0.1)', text: '#F59E0B' };
       case 'image': return { border: '#EC4899', bg: 'rgba(236, 72, 153, 0.1)', text: '#EC4899' };
       case 'vision_footnote': return { border: '#14B8A6', bg: 'rgba(20, 184, 166, 0.1)', text: '#14B8A6' };
+      case 'handwriting': return { border: '#F97316', bg: 'rgba(249, 115, 22, 0.1)', text: '#F97316' };
+      case 'seal': return { border: '#EF4444', bg: 'rgba(239, 68, 68, 0.1)', text: '#EF4444' };
       default: return { border: '#747878', bg: 'rgba(116, 120, 120, 0.1)', text: '#747878' };
     }
   };

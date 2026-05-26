@@ -7,6 +7,7 @@ import {
   CircleHelp,
   Clock3,
   Database,
+  Download,
   FileText,
   Filter,
   FolderOpen,
@@ -15,7 +16,9 @@ import {
   LogOut,
   Menu,
   Plus,
+  RefreshCw,
   Search,
+  SquareCheckBig,
   UserCircle,
   Wrench,
   X
@@ -28,10 +31,14 @@ interface DatasetsPageProps {
   onNavigate: (tab: 'projects' | 'datasets' | 'analytics' | 'team' | 'settings') => void;
   onCreateDataset: (feature: AnnotationFeature) => void;
   onOpenDataset: (jobId: string) => void;
+  onSecondAnnotate: (datasetId: string) => void;
+  onRefreshDatasets: () => void;
 }
 
-type DatasetCategory = 'All' | 'PDF Layout' | 'Completed' | 'Running' | 'Error';
+type DatasetCategory = 'All' | '一次标注' | '已二次标注' | 'ms-swift' | 'Completed' | 'Running' | 'Error';
 type DatasetStatus = 'Completed' | 'Running' | 'Error';
+type TargetFormat = 'llamafactory' | 'swift';
+type SplitType = 'train' | 'val' | 'test' | 'all';
 
 interface DatasetItem {
   id: string;
@@ -48,6 +55,14 @@ interface DatasetItem {
   pageCount: number;
   model: string;
   templateName?: string;
+  annotationStatus: BackendJobSummary['annotation_status'];
+  convertStatus: BackendJobSummary['convert_status'];
+  convertError?: string;
+  convertedFormats: string[];
+  firstAnnotatedAt?: number | null;
+  secondAnnotatedAt?: number | null;
+  lastConvertPath?: string;
+  lastConvertFormat?: string;
 }
 
 const DATASET_TYPE_OPTIONS: Array<{
@@ -88,26 +103,112 @@ const DATASET_TYPE_OPTIONS: Array<{
   },
 ];
 
-export default function DatasetsPage({ jobs, onNavigate, onCreateDataset, onOpenDataset }: DatasetsPageProps) {
+export default function DatasetsPage({ jobs, onNavigate, onCreateDataset, onOpenDataset, onSecondAnnotate, onRefreshDatasets }: DatasetsPageProps) {
   const [activeCategory, setActiveCategory] = useState<DatasetCategory>('All');
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'All' | DatasetStatus>('All');
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [convertDialog, setConvertDialog] = useState<{ open: boolean; targetFormat: TargetFormat }>({ open: false, targetFormat: 'llamafactory' });
+  const [mergeDatasets, setMergeDatasets] = useState(true);
+  const [splitType, setSplitType] = useState<SplitType>('train');
+  const [overwriteOutput, setOverwriteOutput] = useState(false);
+  const [outputName, setOutputName] = useState(defaultOutputName('llamafactory', true));
+  const [convertMessage, setConvertMessage] = useState('');
+  const [convertError, setConvertError] = useState('');
+  const [isConverting, setIsConverting] = useState(false);
 
   const datasets = useMemo(() => jobs.map(mapJobToDataset), [jobs]);
 
   const totalPages = useMemo(() => jobs.reduce((sum, job) => sum + (job.page_count || 0), 0), [jobs]);
   const totalBlocks = useMemo(() => jobs.reduce((sum, job) => sum + (job.block_count || 0), 0), [jobs]);
   const completedCount = useMemo(() => datasets.filter((dataset) => dataset.status === 'Completed').length, [datasets]);
+  const selectedDatasets = useMemo(() => datasets.filter((dataset) => selectedIds.includes(dataset.id)), [datasets, selectedIds]);
 
   const filteredDatasets = useMemo(() => {
     return datasets.filter((dataset) => {
-      const matchesCategory = activeCategory === 'All' || activeCategory === 'PDF Layout' || dataset.status === activeCategory;
+      const matchesCategory =
+        activeCategory === 'All'
+        || (activeCategory === '一次标注' && dataset.annotationStatus === 'first_annotated')
+        || (activeCategory === '已二次标注' && dataset.annotationStatus === 'second_annotated')
+        || (activeCategory === 'ms-swift' && hasSwiftConversion(dataset))
+        || dataset.status === activeCategory;
       const matchesStatus = statusFilter === 'All' || dataset.status === statusFilter;
       const haystack = `${dataset.name} ${dataset.category} ${dataset.amountLabel} ${dataset.model} ${dataset.templateName || ''}`.toLowerCase();
       return matchesCategory && matchesStatus && haystack.includes(searchTerm.toLowerCase());
     });
   }, [activeCategory, datasets, searchTerm, statusFilter]);
+
+  function toggleSelection(dataset: DatasetItem) {
+    if (!isConvertible(dataset)) {
+      setConvertError(`「${dataset.name}」当前状态不可转换，请选择已处理或已标注完成的数据集。`);
+      return;
+    }
+    setConvertError('');
+    setSelectedIds((current) => current.includes(dataset.id) ? current.filter((id) => id !== dataset.id) : [...current, dataset.id]);
+  }
+
+  function openConvertDialog(targetFormat: TargetFormat) {
+    const invalid = selectedDatasets.filter((dataset) => !isConvertible(dataset));
+    if (selectedDatasets.length === 0) {
+      setConvertError('请先选择至少一个已处理或已标注完成的数据集。');
+      return;
+    }
+    if (invalid.length) {
+      setConvertError(`以下数据集不可转换：${invalid.map((item) => item.name).join('、')}`);
+      return;
+    }
+    setConvertError('');
+    setConvertDialog({ open: true, targetFormat });
+    setOutputName(defaultOutputName(targetFormat, mergeDatasets || selectedDatasets.length > 1));
+  }
+
+  async function startConvert() {
+    try {
+      setIsConverting(true);
+      setConvertError('');
+      setConvertMessage('转换任务已提交，正在处理...');
+      const response = await fetch('/api/datasets/convert', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          dataset_ids: selectedIds,
+          target_format: convertDialog.targetFormat,
+          merge: mergeDatasets,
+          split_type: splitType,
+          output_name: outputName.trim() || defaultOutputName(convertDialog.targetFormat, mergeDatasets),
+          overwrite: overwriteOutput,
+        }),
+      });
+      const task = await response.json();
+      if (!response.ok || task.error) throw new Error(task.error || `HTTP ${response.status}`);
+      await pollConvertTask(task.task_id);
+    } catch (error) {
+      setIsConverting(false);
+      setConvertError(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function pollConvertTask(taskId: string) {
+    for (let i = 0; i < 120; i += 1) {
+      const response = await fetch(`/api/datasets/convert/${taskId}`, { cache: 'no-store' });
+      const task = await response.json();
+      if (!response.ok || task.error) throw new Error(task.error || `HTTP ${response.status}`);
+      if (task.status !== 'converting') {
+        setIsConverting(false);
+        setConvertDialog((current) => ({ ...current, open: false }));
+        setConvertMessage(`${statusText(task.status)}：${task.output_path || ''}${task.skipped_samples ? `，跳过 ${task.skipped_samples} 条异常样本` : ''}`);
+        if (task.status === 'failed') setConvertError(task.error || '转换失败');
+        if (convertDialog.targetFormat === 'swift' && (task.status === 'success' || task.status === 'partial_success')) {
+          setActiveCategory('ms-swift');
+        }
+        onRefreshDatasets();
+        return;
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 1000));
+    }
+    throw new Error('转换任务超时，请稍后刷新状态。');
+  }
 
   return (
     <div className="min-h-full w-full overflow-hidden bg-surface-container-low text-primary font-['Inter']">
@@ -190,8 +291,21 @@ export default function DatasetsPage({ jobs, onNavigate, onCreateDataset, onOpen
                       type="search"
                     />
                   </div>
-                  <button className="rounded-[0.75rem] border border-primary bg-surface-container-lowest px-6 py-3 text-label-md font-medium text-primary transition-colors hover:bg-surface-container active:scale-[0.98]">
-                    Import Data
+                  <button
+                    type="button"
+                    onClick={() => openConvertDialog('llamafactory')}
+                    className="flex items-center gap-2 rounded-[0.75rem] border border-primary bg-surface-container-lowest px-5 py-3 text-label-md font-medium text-primary transition-colors hover:bg-surface-container active:scale-[0.98]"
+                  >
+                    <Download className="h-[18px] w-[18px]" />
+                    LLaMA-Factory
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openConvertDialog('swift')}
+                    className="flex items-center gap-2 rounded-[0.75rem] border border-primary bg-surface-container-lowest px-5 py-3 text-label-md font-medium text-primary transition-colors hover:bg-surface-container active:scale-[0.98]"
+                  >
+                    <Download className="h-[18px] w-[18px]" />
+                    ms-swift
                   </button>
                   <button
                     type="button"
@@ -221,7 +335,7 @@ export default function DatasetsPage({ jobs, onNavigate, onCreateDataset, onOpen
 
               <div className="relative z-10 mb-8 flex flex-col items-center justify-between gap-4 border-b border-surface-variant pb-4 md:flex-row">
                 <div className="flex w-full gap-6 overflow-x-auto md:w-auto">
-                  {(['All', 'PDF Layout', 'Completed', 'Running', 'Error'] as DatasetCategory[]).map((category) => (
+                  {(['All', '一次标注', '已二次标注', 'ms-swift', 'Completed', 'Running', 'Error'] as DatasetCategory[]).map((category) => (
                     <button
                       key={category}
                       onClick={() => setActiveCategory(category)}
@@ -236,6 +350,17 @@ export default function DatasetsPage({ jobs, onNavigate, onCreateDataset, onOpen
                   ))}
                 </div>
                 <div className="flex w-full justify-end md:w-auto">
+                  <div className="mr-3 flex items-center gap-2 text-label-sm font-semibold text-on-surface-variant">
+                    <SquareCheckBig className="h-4 w-4" />
+                    已选择 {selectedIds.length}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={onRefreshDatasets}
+                    className="mr-2 flex items-center gap-2 rounded-[0.75rem] border border-outline-variant/50 px-3 py-2 text-label-md font-medium text-on-surface-variant transition-colors hover:bg-surface-container active:scale-[0.98]"
+                  >
+                    <RefreshCw className="h-[18px] w-[18px]" />
+                  </button>
                   <button
                     onClick={() => setStatusFilter(statusFilter === 'All' ? 'Completed' : statusFilter === 'Completed' ? 'Running' : statusFilter === 'Running' ? 'Error' : 'All')}
                     className="flex items-center gap-2 rounded-[0.75rem] border border-outline-variant/50 px-4 py-2 text-label-md font-medium text-on-surface-variant transition-colors hover:bg-surface-container active:scale-[0.98]"
@@ -247,20 +372,39 @@ export default function DatasetsPage({ jobs, onNavigate, onCreateDataset, onOpen
                 </div>
               </div>
 
+              {(convertError || convertMessage) && (
+                <div className={`relative z-10 mb-6 rounded-[0.75rem] border px-4 py-3 text-label-md font-semibold ${convertError ? 'border-error/20 bg-error/10 text-error' : 'border-primary/20 bg-primary/10 text-primary'}`}>
+                  {convertError || convertMessage}
+                </div>
+              )}
+
               {filteredDatasets.length > 0 ? (
                 <div className="relative z-10 grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
                   {filteredDatasets.map((dataset) => (
                     <React.Fragment key={dataset.id}>
-                      <DatasetCard dataset={dataset} onOpen={() => onOpenDataset(dataset.id)} />
+                      <DatasetCard
+                        dataset={dataset}
+                        selected={selectedIds.includes(dataset.id)}
+                        onToggleSelected={() => toggleSelection(dataset)}
+                        onOpen={() => onOpenDataset(dataset.id)}
+                        onSecondAnnotate={() => onSecondAnnotate(dataset.id)}
+                        onConvert={() => {
+                          if (!selectedIds.includes(dataset.id)) setSelectedIds([dataset.id]);
+                          setConvertDialog({ open: true, targetFormat: 'swift' });
+                          setOutputName(defaultOutputName('swift', false));
+                        }}
+                      />
                     </React.Fragment>
                   ))}
                 </div>
               ) : (
                 <div className="relative z-10 rounded-[1.5rem] border border-outline-variant/40 bg-surface-container-lowest p-[40px] text-center">
                   <Database className="mx-auto mb-4 h-10 w-10 text-on-surface-variant" />
-                  <h3 className="text-headline-sm font-semibold text-primary">No backend datasets found</h3>
+                  <h3 className="text-headline-sm font-semibold text-primary">{activeCategory === 'ms-swift' ? 'No ms-swift conversions found' : 'No backend datasets found'}</h3>
                   <p className="mx-auto mt-2 max-w-md text-body-md text-on-surface-variant">
-                    Run a PDF analysis from the annotation workspace and the generated dataset records will appear here.
+                    {activeCategory === 'ms-swift'
+                      ? '选择一次标注完成的数据集，点击 ms-swift 转换后，转换结果会出现在这个列表中。'
+                      : 'Run a PDF analysis from the annotation workspace and the generated dataset records will appear here.'}
                   </p>
                 </div>
               )}
@@ -270,6 +414,64 @@ export default function DatasetsPage({ jobs, onNavigate, onCreateDataset, onOpen
       </div>
 
       <AnimatePresence>
+        {convertDialog.open && (
+          <div className="fixed inset-0 z-[75] flex items-center justify-center bg-black/30 p-4 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.98, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.98, y: 10 }}
+              transition={{ duration: 0.18, ease: 'easeOut' }}
+              className="w-full max-w-2xl rounded-[1.5rem] border border-outline-variant/60 bg-surface-container-lowest p-6 shadow-[0_24px_80px_rgba(0,0,0,0.12)]"
+            >
+              <div className="mb-5 flex items-start justify-between">
+                <div>
+                  <h2 className="text-headline-md font-semibold text-primary">转换配置</h2>
+                  <p className="mt-1 text-body-md text-on-surface-variant">目标格式：{convertDialog.targetFormat === 'swift' ? 'ms-swift' : 'LLaMA-Factory'}</p>
+                </div>
+                <button onClick={() => setConvertDialog((current) => ({ ...current, open: false }))} className="rounded-full p-2 text-on-surface-variant hover:bg-surface-container" aria-label="Close convert dialog">
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              <div className="mb-4 max-h-36 overflow-y-auto rounded-[0.75rem] border border-outline-variant/50 bg-surface-container p-3">
+                {selectedDatasets.map((dataset) => (
+                  <div key={dataset.id} className="flex items-center justify-between py-1 text-label-md">
+                    <span className="font-semibold text-primary">{dataset.name}</span>
+                    <span className="text-on-surface-variant">{annotationStatusText(dataset.annotationStatus)}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <label className="space-y-1 text-label-md font-semibold text-primary">
+                  <span>输出目录名称</span>
+                  <input value={outputName} onChange={(event) => setOutputName(event.target.value)} className="w-full rounded-[0.75rem] border border-outline-variant/50 bg-surface-container px-3 py-2 text-body-md outline-none focus:border-primary" />
+                </label>
+                <label className="space-y-1 text-label-md font-semibold text-primary">
+                  <span>数据用途</span>
+                  <select value={splitType} onChange={(event) => setSplitType(event.target.value as SplitType)} className="w-full rounded-[0.75rem] border border-outline-variant/50 bg-surface-container px-3 py-2 text-body-md outline-none focus:border-primary">
+                    <option value="train">train</option>
+                    <option value="val">val</option>
+                    <option value="test">test</option>
+                    <option value="all">all</option>
+                  </select>
+                </label>
+                <label className="flex items-center gap-3 rounded-[0.75rem] border border-outline-variant/50 bg-surface-container px-3 py-2 text-label-md font-semibold text-primary">
+                  <input type="checkbox" checked={mergeDatasets} onChange={(event) => setMergeDatasets(event.target.checked)} className="accent-current" />
+                  合并多个数据集
+                </label>
+                <label className="flex items-center gap-3 rounded-[0.75rem] border border-outline-variant/50 bg-surface-container px-3 py-2 text-label-md font-semibold text-primary">
+                  <input type="checkbox" checked={overwriteOutput} onChange={(event) => setOverwriteOutput(event.target.checked)} className="accent-current" />
+                  覆盖已有同名目录
+                </label>
+              </div>
+              <div className="mt-6 flex justify-end gap-3">
+                <button onClick={() => setConvertDialog((current) => ({ ...current, open: false }))} className="rounded-[0.75rem] border border-outline-variant/50 px-4 py-2 text-label-md font-semibold text-on-surface-variant hover:bg-surface-container">取消</button>
+                <button onClick={startConvert} disabled={isConverting} className="rounded-[0.75rem] bg-primary px-4 py-2 text-label-md font-semibold text-on-primary hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60">
+                  {isConverting ? '转换中...' : '开始转换'}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
         {isCreateDialogOpen && (
           <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/30 p-4 backdrop-blur-sm">
             <motion.div
@@ -366,8 +568,23 @@ function KpiCard({ label, value }: { label: string; value: string }) {
   );
 }
 
-function DatasetCard({ dataset, onOpen }: { dataset: DatasetItem; onOpen: () => void }) {
+function DatasetCard({
+  dataset,
+  selected,
+  onToggleSelected,
+  onOpen,
+  onSecondAnnotate,
+  onConvert,
+}: {
+  dataset: DatasetItem;
+  selected: boolean;
+  onToggleSelected: () => void;
+  onOpen: () => void;
+  onSecondAnnotate: () => void;
+  onConvert: () => void;
+}) {
   const isError = dataset.status === 'Error';
+  const canSecondAnnotate = dataset.status === 'Completed' && ['first_annotated', 'second_annotated'].includes(dataset.annotationStatus || '');
 
   return (
     <article
@@ -386,7 +603,18 @@ function DatasetCard({ dataset, onOpen }: { dataset: DatasetItem; onOpen: () => 
         <div className={`flex h-12 w-12 items-center justify-center rounded-[0.75rem] bg-surface-container-high text-primary transition-colors group-hover:bg-primary group-hover:text-surface-container-lowest ${isError ? 'opacity-60' : ''}`}>
           {iconForDataset(dataset.icon)}
         </div>
-        <StatusBadge status={dataset.status} />
+        <div className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={selected}
+            disabled={!isConvertible(dataset)}
+            onClick={(event) => event.stopPropagation()}
+            onChange={onToggleSelected}
+            className="h-4 w-4 accent-primary disabled:cursor-not-allowed disabled:opacity-40"
+            aria-label={`Select ${dataset.name}`}
+          />
+          <StatusBadge status={dataset.status} />
+        </div>
       </div>
 
       <h3 className={`mb-2 text-headline-md font-semibold leading-8 ${isError ? 'text-on-surface-variant' : 'text-primary'}`}>
@@ -407,6 +635,15 @@ function DatasetCard({ dataset, onOpen }: { dataset: DatasetItem; onOpen: () => 
         <p>{dataset.blockCount} layout blocks</p>
         <p>{dataset.model}</p>
         {dataset.templateName && <p>{dataset.templateName}</p>}
+        <p>标注阶段：{annotationStatusText(dataset.annotationStatus)}</p>
+        <p>转换状态：{convertStatusText(dataset.convertStatus)}</p>
+        {dataset.convertedFormats.length > 0 && <p>格式：{dataset.convertedFormats.map(formatLabel).join(', ')}</p>}
+        {dataset.lastConvertPath && (
+          <p className="truncate" title={dataset.lastConvertPath}>
+            输出目录：{dataset.lastConvertPath}
+          </p>
+        )}
+        {dataset.convertError && <p className="text-error">错误：{dataset.convertError}</p>}
       </div>
 
       <div className="mt-auto">
@@ -421,11 +658,17 @@ function DatasetCard({ dataset, onOpen }: { dataset: DatasetItem; onOpen: () => 
             </div>
           </>
         ) : (
-          <p className={`mb-3 flex items-center gap-1 text-label-sm font-semibold ${isError ? 'text-on-surface-variant/50' : 'text-on-surface-variant/70'}`}>
-            <Clock3 className="h-3.5 w-3.5" />
-            {dataset.updated}
-          </p>
+          <div className={`mb-3 space-y-1 text-label-sm font-semibold ${isError ? 'text-on-surface-variant/50' : 'text-on-surface-variant/70'}`}>
+            <p className="flex items-center gap-1"><Clock3 className="h-3.5 w-3.5" />{dataset.updated}</p>
+            <p>一次标注：{formatTimestamp(dataset.firstAnnotatedAt)}</p>
+            <p>二次标注：{formatTimestamp(dataset.secondAnnotatedAt)}</p>
+          </div>
         )}
+        <div className="grid grid-cols-3 gap-2 pt-2">
+          <button type="button" onClick={(event) => { event.stopPropagation(); onOpen(); }} className="rounded bg-surface-container px-2 py-1.5 text-label-sm font-semibold text-primary hover:bg-surface-container-high">查看</button>
+          <button type="button" disabled={!canSecondAnnotate} onClick={(event) => { event.stopPropagation(); onSecondAnnotate(); }} className="rounded bg-surface-container px-2 py-1.5 text-label-sm font-semibold text-primary hover:bg-surface-container-high disabled:cursor-not-allowed disabled:opacity-40">二次标注</button>
+          <button type="button" disabled={!isConvertible(dataset)} onClick={(event) => { event.stopPropagation(); onConvert(); }} className="rounded bg-surface-container px-2 py-1.5 text-label-sm font-semibold text-primary hover:bg-surface-container-high disabled:cursor-not-allowed disabled:opacity-40">转换</button>
+        </div>
       </div>
     </article>
   );
@@ -466,10 +709,11 @@ function iconForDataset(icon: DatasetItem['icon']) {
 function mapJobToDataset(job: BackendJobSummary): DatasetItem {
   const progress = job.page_count > 0 ? Math.round(((job.completed_pages || 0) / job.page_count) * 100) : 0;
   const status = normalizeStatus(job.status);
+  const datasetId = job.dataset_id || job.job_id;
 
   return {
-    id: job.job_id,
-    name: job.filename || `Dataset ${job.job_id}`,
+    id: datasetId,
+    name: job.filename || `Dataset ${datasetId}`,
     category: 'PDF Layout',
     amount: formatCount(job.page_count || 0),
     amountLabel: (job.page_count || 0) === 1 ? 'page' : 'pages',
@@ -482,6 +726,14 @@ function mapJobToDataset(job: BackendJobSummary): DatasetItem {
     pageCount: job.page_count || 0,
     model: job.model || 'Unknown model',
     templateName: job.prompt_template?.name,
+    annotationStatus: job.annotation_status || (status === 'Completed' ? 'first_annotated' : 'none'),
+    convertStatus: job.convert_status || 'none',
+    convertError: job.convert_error,
+    convertedFormats: job.converted_formats || [],
+    firstAnnotatedAt: job.first_annotated_at,
+    secondAnnotatedAt: job.second_annotated_at,
+    lastConvertPath: job.last_convert_record?.output_path,
+    lastConvertFormat: job.last_convert_record?.target_format,
   };
 }
 
@@ -506,4 +758,79 @@ function formatUpdatedAt(updatedAt?: number): string {
   if (deltaSeconds < 86400) return `Updated ${Math.floor(deltaSeconds / 3600)} hours ago`;
   if (deltaSeconds < 2592000) return `Updated ${Math.floor(deltaSeconds / 86400)} days ago`;
   return new Date(updatedAt * 1000).toLocaleDateString('zh-CN');
+}
+
+function isConvertible(dataset: DatasetItem): boolean {
+  return dataset.status === 'Completed' && ['first_annotated', 'second_annotated'].includes(dataset.annotationStatus || '');
+}
+
+function hasSwiftConversion(dataset: DatasetItem): boolean {
+  return dataset.convertedFormats.some((format) => format === 'swift' || format === 'ms-swift') || dataset.lastConvertFormat === 'swift';
+}
+
+function formatLabel(format: string): string {
+  if (format === 'swift') return 'ms-swift';
+  if (format === 'llamafactory') return 'LLaMA-Factory';
+  return format;
+}
+
+function annotationStatusText(status?: BackendJobSummary['annotation_status']): string {
+  switch (status) {
+    case 'second_annotated':
+      return '已二次标注';
+    case 'second_annotating':
+      return '二次标注中';
+    case 'first_annotated':
+      return '一次标注完成';
+    default:
+      return '未标注';
+  }
+}
+
+function convertStatusText(status?: BackendJobSummary['convert_status']): string {
+  switch (status) {
+    case 'converting':
+      return '转换中';
+    case 'success':
+      return '转换成功';
+    case 'failed':
+      return '转换失败';
+    case 'partial_success':
+      return '部分成功';
+    default:
+      return '未转换';
+  }
+}
+
+function statusText(status?: string): string {
+  switch (status) {
+    case 'success':
+      return '转换成功';
+    case 'partial_success':
+      return '部分成功';
+    case 'failed':
+      return '转换失败';
+    default:
+      return status || '未知状态';
+  }
+}
+
+function formatTimestamp(value?: number | null): string {
+  if (!value) return '—';
+  return new Date(value * 1000).toLocaleString('zh-CN', { hour12: false });
+}
+
+function defaultOutputName(format: TargetFormat, merge: boolean): string {
+  const now = new Date();
+  const stamp = [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, '0'),
+    String(now.getDate()).padStart(2, '0'),
+    '_',
+    String(now.getHours()).padStart(2, '0'),
+    String(now.getMinutes()).padStart(2, '0'),
+    String(now.getSeconds()).padStart(2, '0'),
+  ].join('');
+  const prefix = merge ? 'merged_' : '';
+  return `${prefix}${format === 'swift' ? 'swift' : 'llamafactory'}_${stamp}`;
 }
