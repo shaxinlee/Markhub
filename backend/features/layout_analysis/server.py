@@ -95,6 +95,11 @@ LAYOUT_PROMPT = """你是一个专业的文档版面分析模型。现在给你�
 
 你的任务不是总结页面内容，而是进行版面结构解析，包括标题、正文、列表、表格、公式、图表、图片、图题/说明、页眉页脚、脚注、手写字、印章等区域。
 
+识别流程必须按下面顺序执行：
+1. 先整体浏览页面，判断是否存在页眉、页脚、页码、合同编号、文件编号、公司名等重复性边缘信息。
+2. 再从上到下、从左到右扫描正文区域，主动寻找标题、段落、列表、表格、公式、图表、图片、说明文字、脚注/注释。
+3. 最后单独复查所有红色/蓝色/圆形/方形印章、手写签名、手写日期、手写金额、手写批注，确保它们没有被漏掉或误归为 image/text。
+
 请严格只使用以下 block_type 类型，不允许创造新类型：
 
 1. doc_title：文档总标题，通常出现在封面或首页中央，表示整份文档的名称。
@@ -147,6 +152,21 @@ LAYOUT_PROMPT = """你是一个专业的文档版面分析模型。现在给你�
   - 公式主体：formula。
   - 图表主体：chart。
 
+逐类扫描清单：
+- doc_title / paragraph_title：检查页面顶部、居中大字、加粗编号、章节编号、合同/报告名称，不要把标题合并进 text。
+- text：只用于普通段落和无法归入其他结构的印刷文字；如果是列表、题注、页眉页脚、脚注，请使用更具体的类型。
+- list：检查圆点、短横线、序号、条款编号、目录缩进、连续短条目；同一组列表应作为 list 块，text 中保留换行或编号。
+- table：检查网格线、对齐的行列、多列表头、财务报表、无边框但列对齐明显的表格；尽量输出 HTML table。
+- formula：检查数学公式、化学式、变量推导、分式、根号、上下标、公式编号；即使公式旁边有编号，也不要标为 text/image。
+- chart：检查坐标轴、图例、柱状/折线/饼图/散点图/面积图/组合图；图表主体标 chart，标题和说明另拆。
+- figure_title：检查紧邻图片/图表/表格的“图X”“表X”标题；如果是解释说明而非标题，用 caption。
+- image：只用于照片、产品图、流程图、架构图、示意图等普通视觉对象；不要用 image 表示公式、表格、数据图表、印章或手写内容。
+- vision_footnote：检查“注：”“说明：”“资料来源：”“单位：”“币种：”等脚注、来源、单位说明。
+- header / footer：检查页面顶部或底部的重复信息、页码、合同编号、文件编号、保密声明、公司名；重要时分别输出 header/footer。
+- caption：检查图、表、公式、图片附近的说明文字、题注、解释性短句；不要并入主体块。
+- handwriting：检查所有非印刷体书写，包括签名、日期、金额、批注、勾画旁文字、人工填写内容。
+- seal：检查圆章、椭圆章、方章、骑缝章、红章、蓝章、签章，不要标为 image。
+
 标题层级判断：
 - 必须为每个 doc_title / paragraph_title 判断 level，只能输出 H1、H2、H3 或 null。
 - doc_title 的 level 必须为 H1。
@@ -165,6 +185,9 @@ LAYOUT_PROMPT = """你是一个专业的文档版面分析模型。现在给你�
 - 不要把数据图表误标为 image；柱状图、折线图、饼图、散点图、组合图等统一标为 chart。
 - 图表、公式、表格的标题或说明不要并入主体块，优先拆成 figure_title、caption 或 vision_footnote。
 - 页眉页脚如果只是重复装饰信息可以忽略；如果包含页码、合同编号、文件编号、公司名、保密说明等可追溯信息，分别标为 header 或 footer。
+- 不要因为 caption、vision_footnote、header、footer 字号小就忽略；只要它们承载页面结构或可追溯信息，就应输出。
+- 不要把列表中的每一行拆成多个零散 text 块；同一列表视觉上属于一组时应合并为一个 list 块。
+- 不要把表格内部的图例、公式、手写批注、印章强行并入 table；如果它们是独立覆盖或独立区域，请拆成对应类型。
 
 手写字与印章识别要求：
 - 不要忽略手写签名、手写日期、手写金额、手写批注、手写勾画旁的文字；这类内容统一标为 handwriting。
@@ -185,6 +208,7 @@ PROMPT_TEMPLATES = {
     }
 }
 DEFAULT_PROMPT_TEMPLATE_ID = "default_template_1"
+BUILTIN_LAYOUT_PROMPT_REVISION = "layout_prompt_v20260527_paddleocr_vl_elements"
 PROMPT_TEMPLATE_CATEGORIES = {"bounding_box", "polygon", "layout", "keypoints", "text_transcription"}
 PROMPT_TYPES = {
     "data_annotation",
@@ -467,7 +491,7 @@ def default_prompt_record() -> Dict[str, Any]:
         "created_at": now,
         "updated_at": now,
         "deleted_at": None,
-        "notes": "系统默认提示词，可复制后创建自定义版本。",
+        "notes": f"系统默认提示词，可复制后创建自定义版本。revision={BUILTIN_LAYOUT_PROMPT_REVISION}",
         "usage_scenarios": ["数据自动标注", "文档版面分析"],
         "versions": [],
         "operation_logs": [],
@@ -503,6 +527,30 @@ def migrate_legacy_prompt_templates() -> None:
         existing_ids.add(template_id)
     enforce_default_constraints(prompts)
     write_prompt_store(payload)
+
+
+def upgrade_builtin_default_prompt() -> None:
+    payload = prompt_store_payload()
+    prompts = payload.setdefault("prompts", [])
+    changed = False
+    for prompt in prompts:
+        if not isinstance(prompt, dict) or prompt.get("id") != DEFAULT_PROMPT_TEMPLATE_ID or prompt.get("deleted_at"):
+            continue
+        notes = str(prompt.get("notes") or "")
+        if BUILTIN_LAYOUT_PROMPT_REVISION in notes and prompt.get("content") == LAYOUT_PROMPT:
+            return
+        prompt["description"] = "系统内置的文档版面分析 Prompt，主动识别标题、正文、列表、表格、公式、图表、图片、页眉页脚、脚注、手写字和印章。"
+        prompt["content"] = LAYOUT_PROMPT
+        prompt["variables"] = "输入为当前页面图片；模型必须逐类扫描并输出严格 JSON。"
+        prompt["version"] = next_prompt_version(str(prompt.get("version") or "v1.0"))
+        prompt["updated_at"] = prompt_now()
+        prompt["notes"] = f"系统默认提示词，可复制后创建自定义版本。revision={BUILTIN_LAYOUT_PROMPT_REVISION}"
+        prompt.setdefault("versions", []).append(version_record(prompt, "升级内置默认提示词：补充逐类扫描和 PaddleOCR-VL 风格版面元素识别", "system"))
+        log_prompt_operation(prompt, "upgrade", f"升级到 {BUILTIN_LAYOUT_PROMPT_REVISION}", "system")
+        changed = True
+        break
+    if changed:
+        write_prompt_store(payload)
 
 
 def normalize_prompt_record(raw: Dict[str, Any], is_new: bool = False) -> Dict[str, Any]:
@@ -2625,6 +2673,7 @@ def clean_text(value: Any, default: str = "") -> str:
 
 load_saved_prompt_templates()
 migrate_legacy_prompt_templates()
+upgrade_builtin_default_prompt()
 
 
 def main() -> int:
