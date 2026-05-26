@@ -65,6 +65,72 @@ export interface PromptTemplateOption {
   prompt?: string;
 }
 
+export type PromptType =
+  | 'data_annotation'
+  | 'second_review'
+  | 'data_cleaning'
+  | 'data_conversion'
+  | 'model_inference'
+  | 'system_role'
+  | 'custom';
+
+export type PromptTaskType =
+  | 'layout_analysis'
+  | 'weak_heading_detection'
+  | 'table_recognition'
+  | 'image_captioning'
+  | 'data_quality_check'
+  | 'llamafactory_conversion'
+  | 'swift_conversion'
+  | 'second_manual_review'
+  | 'auto_annotation'
+  | 'custom';
+
+export interface PromptVersion {
+  id: string;
+  prompt_template_id: string;
+  version: string;
+  content: string;
+  variables: string | Record<string, unknown> | unknown[];
+  default_values: Record<string, unknown>;
+  change_log?: string;
+  created_by?: string;
+  created_at?: string;
+}
+
+export interface PromptRecord {
+  id: string;
+  name: string;
+  description: string;
+  type: PromptType;
+  task_type: PromptTaskType;
+  model_name: string;
+  content: string;
+  variables: string | Record<string, unknown> | unknown[];
+  default_values: Record<string, unknown>;
+  version: string;
+  status: 'enabled' | 'disabled';
+  is_default: boolean;
+  created_by?: string;
+  created_at?: string;
+  updated_at?: string;
+  deleted_at?: string | null;
+  notes?: string;
+  usage_scenarios?: string[];
+  versions?: PromptVersion[];
+}
+
+export interface PromptTestResult {
+  success: boolean;
+  inputs: Record<string, unknown>;
+  rendered_prompt: string;
+  model_output: string;
+  model_name: string;
+  elapsed_ms: number;
+  token_usage?: Record<string, unknown> | null;
+  error?: string;
+}
+
 export type BackendBlockType =
   | 'doc_title'
   | 'paragraph_title'

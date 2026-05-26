@@ -21,6 +21,7 @@ Markhub 是一个本地数据标注平台，用于构建和检查多模态、计
 
 - **Dashboard**：以项目卡片形式展示真实标注任务。
 - **Datasets**：汇总已完成和运行中的标注数据集。
+- **提示词管理**：统一管理数据标注、二次校验、数据清洗、数据转换、模型推理等流程使用的 Prompt。
 - **Workspace**：当前支持 PDF 版面分析，包括上传、模型配置、分析任务和页面级结果检查。
 - **Settings**：管理中文界面偏好和提示词模板。
 
@@ -86,6 +87,13 @@ QWEN_RESIZED_HEIGHT=2176
 | `cd frontend && npm run build` | 构建前端和服务端 bundle。 |
 | `PYTHONPYCACHEPREFIX=/private/tmp/markhub_pycache python3 -m py_compile backend/server.py backend/features/layout_analysis/server.py` | 检查后端 Python 语法，且不把缓存写入仓库。 |
 | `python3 scripts/convert_markhub_to_msswift.py` | 将 `backend/datasets/first_annotations/` 中已完成的版面分析标注结果转换为 ms-swift 多模态 SFT 数据。 |
+| `python3 scripts/test_prompt_management_api.py` | 运行提示词管理模块的基础行为检查。 |
+
+## 提示词管理
+
+提示词管理页面支持新增、查看、编辑、删除、复制、启用/停用、按任务设置默认提示词、版本历史、版本回滚和测试运行。提示词数据保存在 `backend/datasets/prompt_templates/`，后端通过 `/api/prompts` 提供完整管理接口。
+
+已启用的版面分析提示词也会兼容暴露到旧的 `/api/prompt-templates` 接口中，所以现有自动标注任务仍可以继续选择提示词。如果任务没有手动选择提示词，后端会自动使用该任务类型下的启用默认提示词。
 
 ## 数据集转换与二次标注
 

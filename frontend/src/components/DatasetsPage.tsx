@@ -28,7 +28,7 @@ import { motion, AnimatePresence } from 'motion/react';
 
 interface DatasetsPageProps {
   jobs: BackendJobSummary[];
-  onNavigate: (tab: 'projects' | 'datasets' | 'analytics' | 'team' | 'settings') => void;
+  onNavigate: (tab: 'projects' | 'datasets' | 'prompts' | 'analytics' | 'team' | 'settings') => void;
   onCreateDataset: (feature: AnnotationFeature) => void;
   onOpenDataset: (jobId: string) => void;
   onSecondAnnotate: (datasetId: string) => void;
@@ -222,6 +222,7 @@ export default function DatasetsPage({ jobs, onNavigate, onCreateDataset, onOpen
           <div className="hidden items-center gap-6 md:flex">
             <TopNavButton label="Projects" active={false} onClick={() => onNavigate('projects')} />
             <TopNavButton label="Datasets" active onClick={() => onNavigate('datasets')} />
+            <TopNavButton label="Prompts" active={false} onClick={() => onNavigate('prompts')} />
             <TopNavButton label="Analytics" active={false} onClick={() => onNavigate('analytics')} />
             <TopNavButton label="Team" active={false} onClick={() => onNavigate('team')} />
             <TopNavButton label="Settings" active={false} onClick={() => onNavigate('settings')} />

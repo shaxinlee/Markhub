@@ -10,6 +10,7 @@ import Dashboard from './components/Dashboard';
 import DatasetsPage from './components/DatasetsPage';
 import Workspace from './components/Workspace';
 import SecondAnnotationWorkspace from './components/SecondAnnotationWorkspace';
+import PromptManagementPage from './components/PromptManagementPage';
 import GlowBackground from './components/GlowBackground';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -64,7 +65,7 @@ export default function App() {
   });
 
   // active Navbar header selection
-  const [activeHeaderTab, setActiveHeaderTab] = useState<'projects' | 'datasets' | 'analytics' | 'team' | 'settings'>('projects');
+  const [activeHeaderTab, setActiveHeaderTab] = useState<'projects' | 'datasets' | 'prompts' | 'analytics' | 'team' | 'settings'>('projects');
   const isDatasetsPage = activeScreen === 'dashboard' && activeHeaderTab === 'datasets';
   const isWorkspace = activeScreen === 'workspace' || activeScreen === 'secondAnnotation';
 
@@ -245,6 +246,16 @@ export default function App() {
                   数据集
                 </button>
                 <button 
+                  onClick={() => setActiveHeaderTab('prompts')}
+                  className={`pb-1 transition-all ${
+                    activeHeaderTab === 'prompts' 
+                      ? 'text-primary border-b-2 border-primary font-bold'
+                      : 'text-secondary hover:text-primary'
+                  }`}
+                >
+                  提示词管理
+                </button>
+                <button 
                   onClick={() => {
                     setActiveHeaderTab('analytics');
                     alert('Analytics Module: Visual model labeling regression indexes dashboard coming soon.');
@@ -310,7 +321,7 @@ export default function App() {
           <AnimatePresence mode="wait">
             {activeScreen === 'dashboard' ? (
               <motion.div
-                key={activeHeaderTab === 'datasets' ? 'datasets-view' : activeHeaderTab === 'settings' ? 'settings-view' : 'dashboard-view'}
+                key={activeHeaderTab === 'datasets' ? 'datasets-view' : activeHeaderTab === 'prompts' ? 'prompts-view' : activeHeaderTab === 'settings' ? 'settings-view' : 'dashboard-view'}
                 initial={{ opacity: 0, scale: 0.99 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.99 }}
@@ -326,6 +337,8 @@ export default function App() {
                     onSecondAnnotate={handleOpenSecondAnnotation}
                     onRefreshDatasets={loadRealDatasets}
                   />
+                ) : activeHeaderTab === 'prompts' ? (
+                  <PromptManagementPage />
                 ) : activeHeaderTab === 'settings' ? (
                   <SettingsPage
                     language={language}

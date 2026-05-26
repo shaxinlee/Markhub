@@ -21,6 +21,7 @@ The current implementation has completed the document layout analysis annotation
 
 - **Dashboard**: shows real annotation jobs as projects.
 - **Datasets**: summarizes completed and running annotation datasets.
+- **Prompt Management**: manages reusable prompts for annotation, review, cleaning, conversion, inference, defaults, versions, and test runs.
 - **Workspace**: currently supports PDF layout analysis, including upload, model configuration, analysis, and page-level review.
 - **Settings**: manages Chinese UI preferences and prompt templates.
 
@@ -86,6 +87,13 @@ Do not commit real `.env` files or API keys. Use `backend/.env.example` as the t
 | `cd frontend && npm run build` | Build the frontend and server bundle. |
 | `PYTHONPYCACHEPREFIX=/private/tmp/markhub_pycache python3 -m py_compile backend/server.py backend/features/layout_analysis/server.py` | Check backend Python syntax without writing cache files into the repo. |
 | `python3 scripts/convert_markhub_to_msswift.py` | Convert completed `backend/datasets/first_annotations/` layout annotations into an ms-swift multimodal SFT dataset. |
+| `python3 scripts/test_prompt_management_api.py` | Run basic prompt-management behavior checks. |
+
+## Prompt Management
+
+The Prompt Management page provides prompt CRUD, search and filtering, copy, enable/disable, default binding per task, version history, rollback, and test rendering/model execution. Prompt data is stored under `backend/datasets/prompt_templates/` and is exposed through `/api/prompts`.
+
+Enabled layout-analysis prompts are also exposed through the legacy `/api/prompt-templates` contract so existing annotation jobs can select them without changing the current workflow. If a task does not manually select a prompt, the backend uses the enabled default prompt for that task.
 
 ## Dataset Conversion And Second Annotation
 
