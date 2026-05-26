@@ -6,11 +6,12 @@ from __future__ import annotations
 
 import argparse
 import json
-import shutil
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
+
+from PIL import Image
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -78,6 +79,12 @@ def parse_args() -> argparse.Namespace:
         "--no-copy-images",
         action="store_true",
         help="Reference existing image files instead of copying them into output-dir/images.",
+    )
+    parser.add_argument(
+        "--path-mode",
+        choices=("relative", "absolute"),
+        default="relative",
+        help="Write image paths relative to output-dir for portable exports, or absolute paths for same-machine training.",
     )
     parser.add_argument(
         "--system",
@@ -189,19 +196,20 @@ def export_image_path(
     job_id: str,
     page_id: int,
     copy_images: bool,
+    path_mode: str,
 ) -> tuple[str, bool]:
     if not copy_images:
-        return str(source.resolve()), False
+        return (source.resolve() if path_mode == "absolute" else source).as_posix(), False
 
-    suffix = source.suffix or ".png"
-    target = output_dir / "images" / dataset_name / job_id / f"page_{page_id:03d}{suffix}"
+    target = output_dir / "images" / dataset_name / job_id / f"page_{page_id:03d}.png"
     target.parent.mkdir(parents=True, exist_ok=True)
-    if not target.exists() or source.stat().st_mtime_ns != target.stat().st_mtime_ns or source.stat().st_size != target.stat().st_size:
-        shutil.copy2(source, target)
-        copied = True
-    else:
-        copied = False
-    return str(target.resolve()), copied
+    with Image.open(source) as image:
+        image.load()
+        if image.mode not in {"RGB", "L"}:
+            image = image.convert("RGB")
+        image.save(target, format="PNG")
+    image_ref = target.resolve().as_posix() if path_mode == "absolute" else target.relative_to(output_dir).as_posix()
+    return image_ref, True
 
 
 def make_user_prompt(args: argparse.Namespace) -> str:
@@ -225,6 +233,7 @@ def build_sample(
     dataset_name: str,
     image_source: str,
     copy_images: bool,
+    path_mode: str,
 ) -> tuple[dict[str, Any] | None, bool]:
     blocks = make_output_blocks(page.get("blocks") if isinstance(page.get("blocks"), list) else [])
     if not blocks:
@@ -244,6 +253,7 @@ def build_sample(
         job_id=job_id,
         page_id=page_id,
         copy_images=copy_images,
+        path_mode=path_mode,
     )
     answer = {
         "image_path": image_ref,
@@ -309,6 +319,7 @@ def convert(args: argparse.Namespace) -> tuple[ConvertStats, Path]:
                 dataset_name=args.dataset_name,
                 image_source=args.image_source,
                 copy_images=not args.no_copy_images,
+                path_mode=args.path_mode,
             )
             if sample is None:
                 skipped_pages += 1
@@ -345,7 +356,10 @@ def main() -> int:
         f"skipped {stats.skipped_pages} pages; copied {stats.copied_images} images"
     )
     print(f"dataset: {dataset_path.resolve()}")
-    print(f"swift usage: swift sft --dataset {dataset_path.resolve()}")
+    if args.path_mode == "relative":
+        print(f"swift usage: cd {args.output_dir.resolve()} && export ROOT_IMAGE_DIR=$PWD && swift sft --dataset {dataset_path.name}")
+    else:
+        print(f"swift usage: swift sft --dataset {dataset_path.resolve()}")
     return 0
 
 

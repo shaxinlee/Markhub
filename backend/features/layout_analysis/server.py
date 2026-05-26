@@ -2029,7 +2029,18 @@ def run_convert_task(task_id: str, dataset_ids: List[str], target_format: str, m
             "script_version": "markhub-converter-v2",
         }
         write_json_file(output_dir / "convert_config.json", config)
-        (output_dir / "convert_log.txt").write_text("\n".join(logs) + f"\nskipped_samples={skipped}\n", encoding="utf-8")
+        log_text = "\n".join(logs) + f"\nskipped_samples={skipped}\n"
+        if target_format == "swift":
+            usage_note = (
+                "\nms-swift usage note:\n"
+                f"  cd {output_dir}\n"
+                "  export ROOT_IMAGE_DIR=$PWD\n"
+                "  swift sft --dataset train.jsonl\n"
+                "The images field uses paths relative to this converted dataset directory.\n"
+            )
+            log_text += usage_note
+            (output_dir / "README_ms_swift.txt").write_text(usage_note, encoding="utf-8")
+        (output_dir / "convert_log.txt").write_text(log_text, encoding="utf-8")
 
         status = "partial_success" if skipped else "success"
         task.update({"status": status, "output_path": str(output_dir), "message": "转换完成", "skipped_samples": skipped})
@@ -2098,10 +2109,8 @@ def samples_from_annotation(dataset_id: str, payload: Dict[str, Any], annotation
             source_image = image_path_from_page_url(dataset_id, str(page.get("image_url") or ""))
             if not source_image or not source_image.is_file():
                 raise FileNotFoundError(f"image not found for page {page.get('page_id')}")
-            target_image = output_dir / "images" / safe_path_name(dataset_id) / source_image.name
-            target_image.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source_image, target_image)
-            image_ref = str(target_image.resolve())
+            target_image = output_dir / "images" / safe_path_name(dataset_id) / f"page_{int(page.get('page_id') or 0):03d}.png"
+            image_ref = prepare_portable_image_ref(source_image, target_image, output_dir)
             answer = json.dumps({"image_path": image_ref, "blocks": blocks, "context_before": "", "context_after": ""}, ensure_ascii=False, separators=(",", ":"))
             if target_format == "swift":
                 samples.append(
@@ -2126,6 +2135,22 @@ def samples_from_annotation(dataset_id: str, payload: Dict[str, Any], annotation
         except Exception:
             skipped += 1
     return samples, skipped
+
+
+def prepare_portable_image_ref(source_image: Path, target_image: Path, output_dir: Path) -> str:
+    """Normalize exported images and return a portable training path.
+
+    Vision fine-tuning loaders treat `images` as paths/URLs. Absolute local paths
+    break after the export folder is moved to a training machine, so JSONL stores
+    paths relative to the conversion output directory.
+    """
+    target_image.parent.mkdir(parents=True, exist_ok=True)
+    with Image.open(source_image) as image:
+        image.load()
+        if image.mode not in {"RGB", "L"}:
+            image = image.convert("RGB")
+        image.save(target_image, format="PNG")
+    return target_image.relative_to(output_dir).as_posix()
 
 
 DEFAULT_SWIFT_USER_PROMPT = "<image>\n请识别图片中的所有主要版面块，并按照阅读顺序输出严格合法的 JSON。"
