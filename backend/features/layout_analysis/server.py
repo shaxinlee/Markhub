@@ -57,7 +57,7 @@ BLOCK_TYPES = {
     "doc_title",
     "paragraph_title",
     "text",
-    "list",
+    "table_of_contents",
     "table",
     "formula",
     "chart",
@@ -70,6 +70,7 @@ BLOCK_TYPES = {
     "handwriting",
     "seal",
 }
+BLOCK_TYPE_ALIASES = {"list": "table_of_contents"}
 LEVELS = {"H1", "H2", "H3"}
 
 DEFAULT_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
@@ -93,11 +94,11 @@ RESIZE_PRESETS = {
 
 LAYOUT_PROMPT = """你是一个专业的文档版面分析模型。现在给你一张文档页面图片，请识别页面中的所有主要版面块，并按照阅读顺序输出结构化 JSON。
 
-你的任务不是总结页面内容，而是进行版面结构解析，包括标题、正文、列表、表格、公式、图表、图片、图题/说明、页眉页脚、脚注、手写字、印章等区域。
+你的任务不是总结页面内容，而是进行版面结构解析，包括标题、正文、目录、表格、公式、图表、图片、图题/说明、页眉页脚、脚注、手写字、印章等区域。
 
 识别流程必须按下面顺序执行：
 1. 先整体浏览页面，判断是否存在页眉、页脚、页码、合同编号、文件编号、公司名等重复性边缘信息。
-2. 再从上到下、从左到右扫描正文区域，主动寻找标题、段落、列表、表格、公式、图表、图片、说明文字、脚注/注释。
+2. 再从上到下、从左到右扫描正文区域，主动寻找标题、段落、目录、表格、公式、图表、图片、说明文字、脚注/注释。
 3. 最后单独复查所有红色/蓝色/圆形/方形印章、手写签名、手写日期、手写金额、手写批注，确保它们没有被漏掉或误归为 image/text。
 
 请严格只使用以下 block_type 类型，不允许创造新类型：
@@ -105,7 +106,7 @@ LAYOUT_PROMPT = """你是一个专业的文档版面分析模型。现在给你�
 1. doc_title：文档总标题，通常出现在封面或首页中央，表示整份文档的名称。
 2. paragraph_title：章节标题、段落标题、小节标题，例如“第一节 重要提示”“1、公司简介”“（一）公司的主营业务”。
 3. text：普通正文、普通说明文字、无法归入其他结构类型的印刷文本。
-4. list：项目符号列表、编号列表、条款列表、目录式列表、连续短条目。每个列表组可合并为一个 list 块。
+4. table_of_contents：文档目录、目录页、目录条目、带页码的章节索引、点线引导目录、缩进层级目录。每个连续目录区域可合并为一个 table_of_contents 块。
 5. table：表格区域，包括财务表格、信息表、带网格线或明显行列结构的内容。若表格内部含文字，请尽量输出为 HTML table。
 6. formula：数学公式、化学式、独立公式行、公式编号区域。能转写时优先输出 LaTeX 或原文。
 7. chart：柱状图、折线图、饼图、散点图、面积图、组合图等数据可视化图表主体；图表标题单独用 figure_title 或 caption。
@@ -142,7 +143,7 @@ LAYOUT_PROMPT = """你是一个专业的文档版面分析模型。现在给你�
 - bbox 格式为 [左上角x, 左上角y, 右下角x, 右下角y]，每个值都必须在 0 到 1000 之间。
 - 坐标必须覆盖完整版面块，不要只框住单行文字。
 - 对连续正文段落，如果语义和版面连续，可以合并为一个 text 块。
-- 对项目符号、编号条款、目录条目等明显列表结构，优先标为 list，不要混入普通正文。
+- 对目录页、目录条目、带页码章节索引等明显目录结构，优先标为 table_of_contents，不要混入普通正文。普通项目符号或编号条款如果不是文档目录，按 text 或 paragraph_title 处理。
 - 对标题和正文要分开，不要把标题合并进正文。
 - 对表格、公式、图表的标题、单位说明、主体要尽量分开：
   - 表格标题：figure_title 或 paragraph_title，视其是否是图/表说明标题；
@@ -154,8 +155,8 @@ LAYOUT_PROMPT = """你是一个专业的文档版面分析模型。现在给你�
 
 逐类扫描清单：
 - doc_title / paragraph_title：检查页面顶部、居中大字、加粗编号、章节编号、合同/报告名称，不要把标题合并进 text。
-- text：只用于普通段落和无法归入其他结构的印刷文字；如果是列表、题注、页眉页脚、脚注，请使用更具体的类型。
-- list：检查圆点、短横线、序号、条款编号、目录缩进、连续短条目；同一组列表应作为 list 块，text 中保留换行或编号。
+- text：只用于普通段落和无法归入其他结构的印刷文字；如果是目录、题注、页眉页脚、脚注，请使用更具体的类型。
+- table_of_contents：检查“目录”页、章节名称加页码、点线引导符、缩进层级、连续目录条目；同一组目录应作为 table_of_contents 块，text 中保留换行、页码和层级关系。
 - table：检查网格线、对齐的行列、多列表头、财务报表、无边框但列对齐明显的表格；尽量输出 HTML table。
 - formula：检查数学公式、化学式、变量推导、分式、根号、上下标、公式编号；即使公式旁边有编号，也不要标为 text/image。
 - chart：检查坐标轴、图例、柱状/折线/饼图/散点图/面积图/组合图；图表主体标 chart，标题和说明另拆。
@@ -176,8 +177,8 @@ LAYOUT_PROMPT = """你是一个专业的文档版面分析模型。现在给你�
 - H3：更低层级标题，通常编号形如“（一）”“（二）”“1）”“2）”“3.1”“4.1”，或出现在 H2 下面的局部模式/分项标题。财报中如“（一）公司的主营业务”“1、采购模式”“2、生产模式”“3、销售模式”“3.1 近3年的主要会计数据和财务指标”“3.2 报告期分季度的主要会计数据”“4.1 报告期末...”应为 H3。
 - 如果同一页标题视觉明显但编号弱，按其所在位置和语义层级判断；如果标题视觉不明显但根据编号、位置或语义应为标题，则 block_type=paragraph_title 且 weak_heading=true。
 - 如果标题视觉明显，例如居中、加粗、字号较大、单独成行，则 weak_heading=false。
-- 普通正文、列表、表格、公式、图表、图片、图题、题注、页眉页脚、脚注的 level 必须为 null。
-- figure_title、list、table、formula、chart、image、vision_footnote、header、footer、caption、handwriting、seal 即使包含编号，也不要设置 H1/H2/H3，level 必须为 null。
+- 普通正文、目录、表格、公式、图表、图片、图题、题注、页眉页脚、脚注的 level 必须为 null。
+- figure_title、table_of_contents、table、formula、chart、image、vision_footnote、header、footer、caption、handwriting、seal 即使包含编号，也不要设置 H1/H2/H3，level 必须为 null。
 - 不确定层级时，优先保持保守：章级用 H1，章内主条目用 H2，主条目下的模式/分项用 H3。
 
 复杂元素识别要求：
@@ -186,7 +187,7 @@ LAYOUT_PROMPT = """你是一个专业的文档版面分析模型。现在给你�
 - 图表、公式、表格的标题或说明不要并入主体块，优先拆成 figure_title、caption 或 vision_footnote。
 - 页眉页脚如果只是重复装饰信息可以忽略；如果包含页码、合同编号、文件编号、公司名、保密说明等可追溯信息，分别标为 header 或 footer。
 - 不要因为 caption、vision_footnote、header、footer 字号小就忽略；只要它们承载页面结构或可追溯信息，就应输出。
-- 不要把列表中的每一行拆成多个零散 text 块；同一列表视觉上属于一组时应合并为一个 list 块。
+- 不要把目录中的每一行拆成多个零散 text 块；同一目录视觉上属于一组时应合并为一个 table_of_contents 块。
 - 不要把表格内部的图例、公式、手写批注、印章强行并入 table；如果它们是独立覆盖或独立区域，请拆成对应类型。
 
 手写字与印章识别要求：
@@ -208,7 +209,7 @@ PROMPT_TEMPLATES = {
     }
 }
 DEFAULT_PROMPT_TEMPLATE_ID = "default_template_1"
-BUILTIN_LAYOUT_PROMPT_REVISION = "layout_prompt_v20260527_paddleocr_vl_elements"
+BUILTIN_LAYOUT_PROMPT_REVISION = "layout_prompt_v20260527_toc_label"
 PROMPT_TEMPLATE_CATEGORIES = {"bounding_box", "polygon", "layout", "keypoints", "text_transcription"}
 PROMPT_TYPES = {
     "data_annotation",
@@ -247,7 +248,7 @@ DATASET_LABEL_TYPES = {
     "footnote",
     "reference",
     "caption",
-    "list",
+    "table_of_contents",
     "other",
     "figure_title",
     "image",
@@ -271,6 +272,11 @@ def parse_env_line(line: str) -> Optional[Tuple[str, str]]:
     if '"' in line:
         value = value.replace(r"\n", "\n").replace(r"\"", '"').replace(r"\\", "\\")
     return key, value
+
+
+def normalize_block_type(value: Any, default: str = "text") -> str:
+    label = str(value or default).strip()
+    return BLOCK_TYPE_ALIASES.get(label, label)
 
 
 def read_env_file(path: Path = ENV_FILE) -> Dict[str, str]:
@@ -477,7 +483,7 @@ def default_prompt_record() -> Dict[str, Any]:
     record = {
         "id": DEFAULT_PROMPT_TEMPLATE_ID,
         "name": "默认版面分析提示词",
-        "description": "系统内置的文档版面分析 Prompt，识别标题、正文、列表、表格、公式、图表、图片、页眉页脚、脚注、手写字和印章。",
+        "description": "系统内置的文档版面分析 Prompt，识别标题、正文、目录、表格、公式、图表、图片、页眉页脚、脚注、手写字和印章。",
         "type": "data_annotation",
         "task_type": "layout_analysis",
         "model_name": "all",
@@ -539,13 +545,13 @@ def upgrade_builtin_default_prompt() -> None:
         notes = str(prompt.get("notes") or "")
         if BUILTIN_LAYOUT_PROMPT_REVISION in notes and prompt.get("content") == LAYOUT_PROMPT:
             return
-        prompt["description"] = "系统内置的文档版面分析 Prompt，主动识别标题、正文、列表、表格、公式、图表、图片、页眉页脚、脚注、手写字和印章。"
+        prompt["description"] = "系统内置的文档版面分析 Prompt，主动识别标题、正文、目录、表格、公式、图表、图片、页眉页脚、脚注、手写字和印章。"
         prompt["content"] = LAYOUT_PROMPT
         prompt["variables"] = "输入为当前页面图片；模型必须逐类扫描并输出严格 JSON。"
         prompt["version"] = next_prompt_version(str(prompt.get("version") or "v1.0"))
         prompt["updated_at"] = prompt_now()
         prompt["notes"] = f"系统默认提示词，可复制后创建自定义版本。revision={BUILTIN_LAYOUT_PROMPT_REVISION}"
-        prompt.setdefault("versions", []).append(version_record(prompt, "升级内置默认提示词：补充逐类扫描和 PaddleOCR-VL 风格版面元素识别", "system"))
+        prompt.setdefault("versions", []).append(version_record(prompt, "升级内置默认提示词：将 list 标签替换为 table_of_contents 目录标签", "system"))
         log_prompt_operation(prompt, "upgrade", f"升级到 {BUILTIN_LAYOUT_PROMPT_REVISION}", "system")
         changed = True
         break
@@ -1247,7 +1253,7 @@ def normalize_blocks(payload: Dict[str, Any], model_page: ModelPageImage, origin
             warnings.append(f"page {original_page.page_id} block {raw_index}: 不是对象，已跳过")
             continue
 
-        block_type = str(raw.get("block_type", "")).strip()
+        block_type = normalize_block_type(raw.get("block_type"), "")
         if block_type not in BLOCK_TYPES:
             warnings.append(f"page {original_page.page_id} block {raw_index}: 非法 block_type={block_type!r}，已跳过")
             continue
@@ -1816,7 +1822,7 @@ def build_annotation_payload(job_id: str, payload: Dict[str, Any], version: str,
 
 
 def normalize_annotation_block(block: Dict[str, Any], page_id: int) -> Dict[str, Any]:
-    label = str(block.get("label") or block.get("block_type") or block.get("type") or "text")
+    label = normalize_block_type(block.get("label") or block.get("block_type") or block.get("type"), "text")
     if label not in DATASET_LABEL_TYPES:
         label = "other"
     source = str(block.get("source") or "model")
@@ -1916,7 +1922,7 @@ def overwrite_job_blocks(job_id: str, payload: Dict[str, Any], annotation: Dict[
 
 
 def job_block_from_annotation(block: Dict[str, Any]) -> Dict[str, Any]:
-    label = str(block.get("label") or block.get("block_type") or "text")
+    label = normalize_block_type(block.get("label") or block.get("block_type"), "text")
     return {
         "id": block.get("id"),
         "text": block.get("text", ""),
@@ -2166,7 +2172,7 @@ def image_path_from_page_url(dataset_id: str, image_url: str) -> Optional[Path]:
 
 
 def normalize_export_block(block: Dict[str, Any]) -> Dict[str, Any]:
-    label = str(block.get("label") or block.get("block_type") or "text")
+    label = normalize_block_type(block.get("label") or block.get("block_type"), "text")
     return {
         "id": str(block.get("id") or ""),
         "text": str(block.get("text") or ""),

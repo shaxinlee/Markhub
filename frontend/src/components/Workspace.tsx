@@ -108,7 +108,7 @@ const BLOCK_TYPES: BackendBlockType[] = [
   'doc_title',
   'paragraph_title',
   'text',
-  'list',
+  'table_of_contents',
   'table',
   'formula',
   'chart',
@@ -126,7 +126,7 @@ const BLOCK_TYPE_LABELS: Record<BackendBlockType, string> = {
   doc_title: 'Doc Title',
   paragraph_title: 'Paragraph Title',
   text: 'Text',
-  list: 'List',
+  table_of_contents: 'Table of Contents',
   table: 'Table',
   formula: 'Formula',
   chart: 'Chart',
@@ -144,7 +144,7 @@ const DEFAULT_VISIBLE_TYPES: Record<BackendBlockType, boolean> = {
   doc_title: true,
   paragraph_title: true,
   text: true,
-  list: true,
+  table_of_contents: true,
   table: true,
   formula: true,
   chart: true,
@@ -157,6 +157,10 @@ const DEFAULT_VISIBLE_TYPES: Record<BackendBlockType, boolean> = {
   handwriting: true,
   seal: true
 };
+
+function normalizeBackendBlockType(type: string): BackendBlockType {
+  return (type === 'list' ? 'table_of_contents' : type) as BackendBlockType;
+}
 
 export default function Workspace({
   project,
@@ -311,7 +315,7 @@ export default function Workspace({
         const [x1, y1, x2, y2] = block.bbox || [0, 0, page.width, page.height];
         mapped.push({
           id: block.id,
-          type: block.block_type,
+          type: normalizeBackendBlockType(block.block_type),
           box: [
             clampPercent((y1 / Math.max(page.height, 1)) * 100),
             clampPercent((x1 / Math.max(page.width, 1)) * 100),
@@ -345,7 +349,7 @@ export default function Workspace({
       case 'doc_title': return { border: '#3B82F6', bg: 'rgba(59, 130, 246, 0.1)', text: '#3B82F6' };
       case 'paragraph_title': return { border: '#8B5CF6', bg: 'rgba(139, 92, 246, 0.1)', text: '#8B5CF6' };
       case 'text': return { border: '#A78BFA', bg: 'rgba(167, 139, 250, 0.08)', text: '#A78BFA' };
-      case 'list': return { border: '#06B6D4', bg: 'rgba(6, 182, 212, 0.09)', text: '#06B6D4' };
+      case 'table_of_contents': return { border: '#06B6D4', bg: 'rgba(6, 182, 212, 0.09)', text: '#06B6D4' };
       case 'table': return { border: '#10B981', bg: 'rgba(16, 185, 129, 0.1)', text: '#10B981' };
       case 'formula': return { border: '#F43F5E', bg: 'rgba(244, 63, 94, 0.1)', text: '#F43F5E' };
       case 'chart': return { border: '#22C55E', bg: 'rgba(34, 197, 94, 0.1)', text: '#22C55E' };

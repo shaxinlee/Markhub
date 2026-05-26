@@ -70,7 +70,7 @@ const DEFAULT_LABEL_TYPES = [
   'title',
   'paragraph_title',
   'text',
-  'list',
+  'table_of_contents',
   'handwriting',
   'table',
   'formula',
@@ -84,6 +84,26 @@ const DEFAULT_LABEL_TYPES = [
   'caption',
   'other',
 ];
+
+function normalizeLabel(label: string) {
+  return label === 'list' ? 'table_of_contents' : label;
+}
+
+function normalizeAnnotationPayload(payload: AnnotationPayload): AnnotationPayload {
+  return {
+    ...payload,
+    label_types: payload.label_types?.length
+      ? Array.from(new Set(payload.label_types.map(normalizeLabel).filter((label) => label !== 'list')))
+      : DEFAULT_LABEL_TYPES,
+    pages: (payload.pages || []).map((page) => ({
+      ...page,
+      blocks: (page.blocks || []).map((block) => {
+        const label = normalizeLabel(block.label || block.block_type || 'text');
+        return { ...block, label, block_type: label };
+      }),
+    })),
+  };
+}
 
 export default function SecondAnnotationWorkspace({ datasetId, onGoBack }: SecondAnnotationWorkspaceProps) {
   const [payload, setPayload] = useState<AnnotationPayload | null>(null);
@@ -106,7 +126,9 @@ export default function SecondAnnotationWorkspace({ datasetId, onGoBack }: Secon
   const pages = payload?.pages || [];
   const currentPage = pages[currentPageIndex] || null;
   const selectedBlock = currentPage?.blocks.find((block) => block.id === selectedBlockId) || null;
-  const labelTypes = payload?.label_types?.length ? payload.label_types : DEFAULT_LABEL_TYPES;
+  const labelTypes = payload?.label_types?.length
+    ? Array.from(new Set(payload.label_types.map(normalizeLabel).filter((label) => label !== 'list')))
+    : DEFAULT_LABEL_TYPES;
   const canvasWidth = 760;
   const canvasHeight = currentPage ? Math.round(canvasWidth * (currentPage.height / Math.max(currentPage.width, 1))) : 980;
 
@@ -124,7 +146,7 @@ export default function SecondAnnotationWorkspace({ datasetId, onGoBack }: Secon
   async function loadAnnotations() {
     setError('');
     try {
-      const data = await loadAnnotationPayload();
+      const data = normalizeAnnotationPayload(await loadAnnotationPayload());
       setPayload(data);
       setCurrentPageIndex(0);
       setSelectedBlockId(data.pages?.[0]?.blocks?.[0]?.id || null);
@@ -159,7 +181,7 @@ export default function SecondAnnotationWorkspace({ datasetId, onGoBack }: Secon
         width: page.width,
         height: page.height,
         blocks: (page.blocks || []).map((block, index) => {
-          const label = block.label || block.block_type || 'text';
+          const label = normalizeLabel(block.label || block.block_type || 'text');
           return {
             id: String(block.id || `p${page.page_id.toString().padStart(3, '0')}_b${index.toString().padStart(3, '0')}`),
             bbox: block.bbox || [0, 0, 1, 1],

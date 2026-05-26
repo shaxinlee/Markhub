@@ -701,7 +701,7 @@
       "doc_title",
       "paragraph_title",
       "text",
-      "list",
+      "table_of_contents",
       "table",
       "formula",
       "chart",
@@ -718,7 +718,7 @@
       doc_title: "#b45f06",
       paragraph_title: "#0066b3",
       text: "#138a72",
-      list: "#06b6d4",
+      table_of_contents: "#06b6d4",
       table: "#238823",
       formula: "#f43f5e",
       chart: "#22c55e",
@@ -887,8 +887,12 @@
       return state.data?.result?.blocks || [];
     }
 
+    function blockType(block) {
+      return block.block_type === "list" ? "table_of_contents" : block.block_type;
+    }
+
     function visibleBlocks() {
-      return allBlocks().filter((block) => state.visibleTypes.has(block.block_type));
+      return allBlocks().filter((block) => state.visibleTypes.has(blockType(block)));
     }
 
     function renderSummary() {
@@ -992,7 +996,10 @@
 
     function renderFilters() {
       const counts = Object.fromEntries(TYPES.map((type) => [type, 0]));
-      allBlocks().forEach((block) => counts[block.block_type] = (counts[block.block_type] || 0) + 1);
+      allBlocks().forEach((block) => {
+        const type = blockType(block);
+        counts[type] = (counts[type] || 0) + 1;
+      });
       el("filters").innerHTML = TYPES.map((type) => `
         <label class="chip" style="color:${COLORS[type]}">
           <input type="checkbox" data-type="${type}" ${state.visibleTypes.has(type) ? "checked" : ""} />
@@ -1052,7 +1059,7 @@
       const title = `${label} ${block.id}`;
       return `
         <div class="box${active}" data-id="${block.id}" title="${escapeHtml(title)}"
-          style="left:${left}%;top:${top}%;width:${width}%;height:${height}%;color:${COLORS[block.block_type] || "#116a5b"}">
+          style="left:${left}%;top:${top}%;width:${width}%;height:${height}%;color:${COLORS[blockType(block)] || "#116a5b"}">
           <span class="box-label">${escapeHtml(label)} · ${escapeHtml(block.id)}</span>
         </div>
       `;
@@ -1067,7 +1074,7 @@
       el("blockList").innerHTML = blocks.map((block) => `
         <div class="block-item ${state.activeId === block.id ? "active" : ""}" data-id="${block.id}">
           <div class="block-head">
-            <span class="type-tag" style="color:${COLORS[block.block_type] || "#116a5b"}"><span class="dot"></span>${escapeHtml(blockLabel(block))}</span>
+            <span class="type-tag" style="color:${COLORS[blockType(block)] || "#116a5b"}"><span class="dot"></span>${escapeHtml(blockLabel(block))}</span>
             <span class="block-id">${escapeHtml(block.id)}</span>
           </div>
           <div class="block-text">${escapeHtml(block.text || bboxText(block.bbox))}</div>
@@ -1103,10 +1110,11 @@
     }
 
     function blockLabel(block) {
-      if ((block.block_type === "doc_title" || block.block_type === "paragraph_title") && block.level) {
-        return `${block.level} · ${block.block_type}`;
+      const type = blockType(block);
+      if ((type === "doc_title" || type === "paragraph_title") && block.level) {
+        return `${block.level} · ${type}`;
       }
-      return block.block_type || "unknown";
+      return type || "unknown";
     }
 
     function modelName(data) {

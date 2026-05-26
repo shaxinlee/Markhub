@@ -76,7 +76,7 @@ export default function PromptManagementPage() {
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [fullScreenEditor, setFullScreenEditor] = useState(false);
-  const [testInputs, setTestInputs] = useState('{\n  "input_text": "这里是一段测试文本",\n  "ocr_result": "",\n  "label_schema": "doc_title, paragraph_title, text, list, table, formula, chart, figure_title, image, vision_footnote, header, footer, caption, handwriting, seal"\n}');
+  const [testInputs, setTestInputs] = useState('{\n  "input_text": "这里是一段测试文本",\n  "ocr_result": "",\n  "label_schema": "doc_title, paragraph_title, text, table_of_contents, table, formula, chart, figure_title, image, vision_footnote, header, footer, caption, handwriting, seal"\n}');
   const [callModel, setCallModel] = useState(false);
   const [testResult, setTestResult] = useState<PromptTestResult | null>(null);
 

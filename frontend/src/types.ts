@@ -135,7 +135,7 @@ export type BackendBlockType =
   | 'doc_title'
   | 'paragraph_title'
   | 'text'
-  | 'list'
+  | 'table_of_contents'
   | 'table'
   | 'formula'
   | 'chart'

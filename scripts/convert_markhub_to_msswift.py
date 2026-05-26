@@ -28,10 +28,10 @@ DEFAULT_USER_PROMPT = """<image>
 - 输出对象必须包含 image_path、blocks、context_before、context_after。
 - blocks 中每个对象必须包含 id、text、bbox、page_id、block_type、weak_heading、level。
 - bbox 使用 0-1000 相对坐标，格式为 [左上角x, 左上角y, 右下角x, 右下角y]。
-- block_type 只能使用 doc_title、paragraph_title、text、list、table、formula、chart、figure_title、image、vision_footnote、header、footer、caption、handwriting、seal。
+- block_type 只能使用 doc_title、paragraph_title、text、table_of_contents、table、formula、chart、figure_title、image、vision_footnote、header、footer、caption、handwriting、seal。
 - doc_title / paragraph_title 需要判断 level，可为 H1、H2、H3；其他类型 level 必须为 null。
-- 必须逐类扫描页面：标题、正文、列表、表格、公式、图表、图片/流程图、caption、单位/资料来源、页眉页脚、手写字、印章。
-- list 表示项目符号/编号条款/目录式条目；table 表示行列结构；formula 表示数学/化学公式；chart 表示数据图表；header/footer 表示页眉页脚；caption 表示图表公式说明。
+- 必须逐类扫描页面：标题、正文、目录、表格、公式、图表、图片/流程图、caption、单位/资料来源、页眉页脚、手写字、印章。
+- table_of_contents 表示文档目录、目录页、带页码的章节索引、点线引导目录；table 表示行列结构；formula 表示数学/化学公式；chart 表示数据图表；header/footer 表示页眉页脚；caption 表示图表公式说明。
 - 不要把公式、图表、手写字、印章误标为 image 或 text；不要把 caption、单位说明、资料来源并入主体块。
 - formula 表示数学/化学公式；chart 表示柱状图、折线图、饼图等数据图表；header/footer 表示页眉页脚；caption 表示图表公式说明。
 - handwriting 表示手写字、手写签名、手写日期、手写批注等；seal 表示印章、签章、骑缝章等。
@@ -155,6 +155,8 @@ def make_output_blocks(blocks: list[Any]) -> list[dict[str, Any]]:
             elif key == "level":
                 level = raw_block.get("level")
                 block[key] = level if level in {"H1", "H2", "H3"} else None
+            elif key == "block_type":
+                block[key] = "table_of_contents" if raw_block.get(key) == "list" else str(raw_block.get(key) or "text")
             else:
                 block[key] = str(raw_block.get(key) or "text")
         output_blocks.append(block)
