@@ -17,13 +17,17 @@ import {
   Plus,
   Search,
   UserCircle,
-  Wrench
+  Wrench,
+  X
 } from 'lucide-react';
-import { BackendJobSummary } from '../types';
+import { AnnotationFeature, BackendJobSummary } from '../types';
+import { motion, AnimatePresence } from 'motion/react';
 
 interface DatasetsPageProps {
   jobs: BackendJobSummary[];
   onNavigate: (tab: 'projects' | 'datasets' | 'analytics' | 'team' | 'settings') => void;
+  onCreateDataset: (feature: AnnotationFeature) => void;
+  onOpenDataset: (jobId: string) => void;
 }
 
 type DatasetCategory = 'All' | 'PDF Layout' | 'Completed' | 'Running' | 'Error';
@@ -46,10 +50,49 @@ interface DatasetItem {
   templateName?: string;
 }
 
-export default function DatasetsPage({ jobs, onNavigate }: DatasetsPageProps) {
+const DATASET_TYPE_OPTIONS: Array<{
+  id: AnnotationFeature;
+  label: string;
+  description: string;
+  status: 'available' | 'pending';
+}> = [
+  {
+    id: 'layout',
+    label: '版面分析标注',
+    description: '上传 PDF 后调用现有后端版面分析服务，并进入结果浏览与修正工作台。',
+    status: 'available',
+  },
+  {
+    id: 'bounding_box',
+    label: '目标框标注',
+    description: '待开发',
+    status: 'pending',
+  },
+  {
+    id: 'polygon',
+    label: '多边形分割',
+    description: '待开发',
+    status: 'pending',
+  },
+  {
+    id: 'keypoints',
+    label: '关键点标注',
+    description: '待开发',
+    status: 'pending',
+  },
+  {
+    id: 'text_transcription',
+    label: '文字转录标注',
+    description: '待开发',
+    status: 'pending',
+  },
+];
+
+export default function DatasetsPage({ jobs, onNavigate, onCreateDataset, onOpenDataset }: DatasetsPageProps) {
   const [activeCategory, setActiveCategory] = useState<DatasetCategory>('All');
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'All' | DatasetStatus>('All');
+  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
 
   const datasets = useMemo(() => jobs.map(mapJobToDataset), [jobs]);
 
@@ -150,7 +193,11 @@ export default function DatasetsPage({ jobs, onNavigate }: DatasetsPageProps) {
                   <button className="rounded-[0.75rem] border border-primary bg-surface-container-lowest px-6 py-3 text-label-md font-medium text-primary transition-colors hover:bg-surface-container active:scale-[0.98]">
                     Import Data
                   </button>
-                  <button className="flex items-center gap-2 rounded-[0.75rem] bg-primary px-6 py-3 text-label-md font-medium text-on-primary shadow-sm transition-colors hover:bg-primary/90 active:scale-[0.98]">
+                  <button
+                    type="button"
+                    onClick={() => setIsCreateDialogOpen(true)}
+                    className="flex items-center gap-2 rounded-[0.75rem] bg-primary px-6 py-3 text-label-md font-medium text-on-primary shadow-sm transition-colors hover:bg-primary/90 active:scale-[0.98]"
+                  >
                     <Plus className="h-[18px] w-[18px]" />
                     Create New Dataset
                   </button>
@@ -204,7 +251,7 @@ export default function DatasetsPage({ jobs, onNavigate }: DatasetsPageProps) {
                 <div className="relative z-10 grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
                   {filteredDatasets.map((dataset) => (
                     <React.Fragment key={dataset.id}>
-                      <DatasetCard dataset={dataset} />
+                      <DatasetCard dataset={dataset} onOpen={() => onOpenDataset(dataset.id)} />
                     </React.Fragment>
                   ))}
                 </div>
@@ -221,6 +268,69 @@ export default function DatasetsPage({ jobs, onNavigate }: DatasetsPageProps) {
           </div>
         </main>
       </div>
+
+      <AnimatePresence>
+        {isCreateDialogOpen && (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/30 p-4 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.98, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.98, y: 10 }}
+              transition={{ duration: 0.18, ease: 'easeOut' }}
+              className="w-full max-w-2xl rounded-[1.5rem] border border-outline-variant/60 bg-surface-container-lowest p-6 shadow-[0_24px_80px_rgba(0,0,0,0.12)]"
+            >
+              <div className="mb-6 flex items-start justify-between gap-4">
+                <div>
+                  <h2 className="text-headline-md font-semibold text-primary">选择数据集制作类型</h2>
+                  <p className="mt-2 text-body-md text-on-surface-variant">
+                    当前平台已接入版面分析标注，其余数据集能力会按模块逐步开放。
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsCreateDialogOpen(false)}
+                  className="rounded-full p-2 text-on-surface-variant transition-colors hover:bg-surface-container hover:text-primary"
+                  aria-label="Close dataset type dialog"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 gap-3">
+                {DATASET_TYPE_OPTIONS.map((option) => {
+                  const available = option.status === 'available';
+                  return (
+                    <button
+                      key={option.id}
+                      type="button"
+                      disabled={!available}
+                      onClick={() => {
+                        setIsCreateDialogOpen(false);
+                        onCreateDataset(option.id);
+                      }}
+                      className={`flex items-center justify-between gap-4 rounded-[0.75rem] border p-4 text-left transition-all ${
+                        available
+                          ? 'border-primary bg-primary text-on-primary hover:bg-primary/90 active:scale-[0.99]'
+                          : 'cursor-not-allowed border-outline-variant/50 bg-surface-container text-on-surface-variant opacity-70'
+                      }`}
+                    >
+                      <span>
+                        <span className="block text-label-md font-semibold">{option.label}</span>
+                        <span className={`mt-1 block text-label-sm ${available ? 'text-on-primary/75' : 'text-on-surface-variant'}`}>
+                          {option.description}
+                        </span>
+                      </span>
+                      <span className={`shrink-0 rounded-full px-2.5 py-1 text-label-sm font-semibold ${available ? 'bg-white/15 text-white' : 'bg-surface-container-high text-on-surface-variant'}`}>
+                        {available ? '可用' : '待开发'}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -256,11 +366,22 @@ function KpiCard({ label, value }: { label: string; value: string }) {
   );
 }
 
-function DatasetCard({ dataset }: { dataset: DatasetItem }) {
+function DatasetCard({ dataset, onOpen }: { dataset: DatasetItem; onOpen: () => void }) {
   const isError = dataset.status === 'Error';
 
   return (
-    <article className="group flex h-full cursor-pointer flex-col rounded-[1.5rem] border border-outline-variant/40 bg-surface-container-lowest p-[32px] transition-all duration-300 hover:shadow-[0_8px_30px_rgba(0,0,0,0.04)] active:scale-[0.98]">
+    <article
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onOpen();
+        }
+      }}
+      className="group flex h-full cursor-pointer flex-col rounded-[1.5rem] border border-outline-variant/40 bg-surface-container-lowest p-[32px] transition-all duration-300 hover:shadow-[0_8px_30px_rgba(0,0,0,0.04)] focus:outline-none focus:ring-2 focus:ring-primary/30 active:scale-[0.98]"
+    >
       <div className="mb-6 flex items-start justify-between">
         <div className={`flex h-12 w-12 items-center justify-center rounded-[0.75rem] bg-surface-container-high text-primary transition-colors group-hover:bg-primary group-hover:text-surface-container-lowest ${isError ? 'opacity-60' : ''}`}>
           {iconForDataset(dataset.icon)}

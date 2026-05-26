@@ -64,6 +64,7 @@ export default function App() {
   // active Navbar header selection
   const [activeHeaderTab, setActiveHeaderTab] = useState<'projects' | 'datasets' | 'analytics' | 'team' | 'settings'>('projects');
   const isDatasetsPage = activeScreen === 'dashboard' && activeHeaderTab === 'datasets';
+  const isWorkspace = activeScreen === 'workspace';
 
   useEffect(() => {
     document.documentElement.lang = language;
@@ -154,6 +155,18 @@ export default function App() {
     setActiveScreen('workspace');
   };
 
+  const handleOpenDataset = (jobId: string) => {
+    const project = projects.find((item) => item.backendJobId === jobId);
+    const job = jobs.find((item) => item.job_id === jobId);
+    const targetProject = project || (job ? mapJobToProject(job) : null);
+    if (!targetProject) {
+      alert('未找到该数据集的后端分析结果，请刷新数据集列表后再试。');
+      return;
+    }
+    setSelectedProject(targetProject);
+    setActiveScreen('workspace');
+  };
+
   // Workspace completion updates
   const handleUpdateProjectProgress = (id: string, progress: number) => {
     setProjects(projects.map(p => p.id === id ? { ...p, progress } : p));
@@ -165,38 +178,38 @@ export default function App() {
   };
 
   return (
-    <div className={`${isDatasetsPage ? 'bg-surface-container-low p-0 text-on-surface' : 'bg-[#0c0c0c] p-6 md:p-12 text-[#e5e5e5]'} min-h-screen relative overflow-hidden flex items-center justify-center font-sans select-none`}>
+    <div className={`${isDatasetsPage || isWorkspace ? 'bg-surface-container-low p-0 text-on-surface' : 'bg-surface-container-low p-6 md:p-12 text-on-surface'} min-h-screen relative overflow-hidden flex items-center justify-center font-sans select-none`}>
       
       {/* Glow Effects backdrop elements */}
       {!isDatasetsPage && <GlowBackground />}
 
       {/* Main Container workspace wrapping matching the specified canvas aspect ratios */}
-      <main className={`${isDatasetsPage ? 'w-full min-h-screen bg-surface-container-low' : 'w-full max-w-[1600px] h-full max-h-[900px] min-h-[820px] bg-[#0c0c0c] rounded-2xl shadow-[0_40px_100px_rgba(0,0,0,0.8)] border border-white/10'} flex flex-col overflow-hidden relative z-10`}>
+      <main className={`${isDatasetsPage || isWorkspace ? 'w-full min-h-screen bg-surface-container-low' : 'w-full max-w-[1600px] h-full max-h-[900px] min-h-[820px] bg-surface-container-lowest rounded-2xl shadow-[0_40px_100px_rgba(0,0,0,0.08)] border border-outline-variant/30'} flex flex-col overflow-hidden relative z-10`}>
         
         {/* Top Header Navigation bar (Standard across app state layout switching) */}
         {activeScreen === 'dashboard' && !isDatasetsPage && (
-          <header className="flex justify-between items-center w-full px-10 bg-[#0c0c0c]/80 backdrop-blur-xl border-white/10 border-b py-5 sticky top-0 z-50">
+          <header className="flex justify-between items-center w-full px-10 bg-surface/80 backdrop-blur-xl border-outline-variant/30 border-b py-5 sticky top-0 z-50">
             <div className="flex items-center gap-12">
-              <span className="font-serif italic text-3xl tracking-tighter text-white cursor-pointer" onClick={() => setActiveScreen('dashboard')}>
-                MarkHub.
+              <span className="text-3xl font-black tracking-tight text-primary cursor-pointer" onClick={() => setActiveScreen('dashboard')}>
+                MarkHub
               </span>
-              <nav className="hidden md:flex gap-10 items-center text-[10px] uppercase tracking-[0.25em] font-medium opacity-80 select-none">
+              <nav className="hidden md:flex gap-8 items-center text-sm font-medium select-none">
                 <button 
                   onClick={() => setActiveHeaderTab('projects')}
-                  className={`pb-1 transition-all hover:opacity-100 ${
+                  className={`pb-1 transition-all ${
                     activeHeaderTab === 'projects' 
-                      ? 'text-white border-b border-white font-bold opacity-100' 
-                      : 'text-[#e5e5e5] opacity-50'
+                      ? 'text-primary border-b-2 border-primary font-bold'
+                      : 'text-secondary hover:text-primary'
                   }`}
                 >
                   项目
                 </button>
                 <button 
                   onClick={() => setActiveHeaderTab('datasets')}
-                  className={`pb-1 transition-all hover:opacity-100 ${
+                  className={`pb-1 transition-all ${
                     activeHeaderTab === 'datasets' 
-                      ? 'text-white border-b border-white font-bold opacity-100' 
-                      : 'text-[#e5e5e5] opacity-50'
+                      ? 'text-primary border-b-2 border-primary font-bold'
+                      : 'text-secondary hover:text-primary'
                   }`}
                 >
                   数据集
@@ -206,30 +219,30 @@ export default function App() {
                     setActiveHeaderTab('analytics');
                     alert('Analytics Module: Visual model labeling regression indexes dashboard coming soon.');
                   }}
-                  className={`pb-1 transition-all hover:opacity-100 ${
+                  className={`pb-1 transition-all ${
                     activeHeaderTab === 'analytics' 
-                      ? 'text-white border-b border-white font-bold opacity-100' 
-                      : 'text-[#e5e5e5] opacity-50'
+                      ? 'text-primary border-b-2 border-primary font-bold'
+                      : 'text-secondary hover:text-primary'
                   }`}
                 >
                   分析
                 </button>
                 <button 
                   onClick={() => setActiveHeaderTab('team')}
-                  className={`pb-1 transition-all hover:opacity-100 ${
+                  className={`pb-1 transition-all ${
                     activeHeaderTab === 'team' 
-                      ? 'text-white border-b border-white font-bold opacity-100' 
-                      : 'text-[#e5e5e5] opacity-50'
+                      ? 'text-primary border-b-2 border-primary font-bold'
+                      : 'text-secondary hover:text-primary'
                   }`}
                 >
                   团队
                 </button>
                 <button 
                   onClick={() => setActiveHeaderTab('settings')}
-                  className={`pb-1 transition-all hover:opacity-100 ${
+                  className={`pb-1 transition-all ${
                     activeHeaderTab === 'settings' 
-                      ? 'text-white border-b border-white font-bold opacity-100' 
-                      : 'text-[#e5e5e5] opacity-50'
+                      ? 'text-primary border-b-2 border-primary font-bold'
+                      : 'text-secondary hover:text-primary'
                   }`}
                 >
                   设置
@@ -241,13 +254,13 @@ export default function App() {
             <div className="flex items-center gap-5">
               <button 
                 onClick={() => alert('Global Search: Query tags directly on dashboard filters below.')}
-                className="text-white/60 hover:text-white p-2 transition-all active:scale-95"
+                className="text-secondary hover:text-primary p-2 transition-all active:scale-95"
               >
                 <Search className="w-5 h-5 focus:outline-none" />
               </button>
               
               <div 
-                className="w-9 h-9 rounded-full overflow-hidden border border-white/20 hover:border-white/50 cursor-pointer active:scale-95 duration-100"
+                className="w-10 h-10 rounded-full overflow-hidden border border-outline-variant hover:border-outline cursor-pointer active:scale-95 duration-100"
                 onClick={() => alert(`MarkHub Administrator Profile - Registered Email: shaxinlee3@gmail.com`)}
                 title="View Profile logs"
               >
@@ -275,7 +288,12 @@ export default function App() {
                 className="flex flex-1 overflow-hidden w-full h-full"
               >
                 {activeHeaderTab === 'datasets' ? (
-                  <DatasetsPage jobs={jobs} onNavigate={setActiveHeaderTab} />
+                  <DatasetsPage
+                    jobs={jobs}
+                    onNavigate={setActiveHeaderTab}
+                    onCreateDataset={handleOpenAnnotationFeature}
+                    onOpenDataset={handleOpenDataset}
+                  />
                 ) : activeHeaderTab === 'settings' ? (
                   <SettingsPage
                     language={language}
@@ -334,7 +352,7 @@ interface SettingsPageProps {
 
 function SettingsPage({ language, promptTemplates, onLanguageChange, onSavePromptTemplate }: SettingsPageProps) {
   return (
-    <section className="flex flex-1 overflow-y-auto custom-scrollbar bg-[#0c0c0c] text-[#e5e5e5]">
+    <section className="markhub-settings flex flex-1 overflow-y-auto custom-scrollbar bg-surface-container-low text-on-surface">
       <aside className="w-20 bg-[#0e0e0e] border-r border-white/10 flex flex-col items-center py-10 space-y-12 h-full select-none z-10">
         <div className="p-3 text-white bg-white/10 border border-white/5 rounded-none transition-all">
           <Globe2 className="w-5 h-5" />

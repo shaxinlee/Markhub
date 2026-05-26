@@ -106,3 +106,160 @@
   box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
   z-index: 20 !important;
 }
+
+/* Luminous Precision unification for the legacy dark dashboard/workspace surfaces. */
+#markhub-dashboard,
+#layout-workspace-container,
+.markhub-settings {
+  background: #f9f9fb !important;
+  color: #1a1c1d !important;
+  font-family: "Inter", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", ui-sans-serif, system-ui, sans-serif;
+}
+
+#markhub-dashboard .font-serif,
+#layout-workspace-container .font-serif,
+.markhub-settings .font-serif {
+  font-family: "Inter", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", ui-sans-serif, system-ui, sans-serif !important;
+  font-style: normal !important;
+}
+
+#markhub-dashboard [class*="bg-[#0c0c0c]"],
+#layout-workspace-container [class*="bg-[#0c0c0c]"],
+.markhub-settings [class*="bg-[#0c0c0c]"] {
+  background-color: #f9f9fb !important;
+}
+
+#markhub-dashboard [class*="bg-[#0e0e0e]"],
+#layout-workspace-container [class*="bg-[#0e0e0e]"],
+.markhub-settings [class*="bg-[#0e0e0e]"],
+#markhub-dashboard [class*="bg-[#141414]"],
+#layout-workspace-container [class*="bg-[#141414]"],
+.markhub-settings [class*="bg-[#141414]"] {
+  background-color: #ffffff !important;
+}
+
+#markhub-dashboard [class*="bg-[#131313]"],
+#layout-workspace-container [class*="bg-[#131313]"],
+.markhub-settings [class*="bg-[#131313]"] {
+  background-color: #e8e8ea !important;
+}
+
+#markhub-dashboard [class*="bg-white/["],
+#layout-workspace-container [class*="bg-white/["],
+.markhub-settings [class*="bg-white/["] {
+  background-color: #f3f3f5 !important;
+}
+
+#markhub-dashboard [class*="border-white"],
+#layout-workspace-container [class*="border-white"],
+.markhub-settings [class*="border-white"] {
+  border-color: rgba(196, 199, 199, 0.75) !important;
+}
+
+#markhub-dashboard [class*="text-white"],
+#layout-workspace-container [class*="text-white"],
+.markhub-settings [class*="text-white"] {
+  color: #1a1c1d !important;
+}
+
+#markhub-dashboard [class*="text-[#e5e5e5]"],
+#layout-workspace-container [class*="text-[#e5e5e5]"],
+.markhub-settings [class*="text-[#e5e5e5]"] {
+  color: #1a1c1d !important;
+}
+
+#markhub-dashboard [class*="text-white/"],
+#layout-workspace-container [class*="text-white/"],
+.markhub-settings [class*="text-white/"] {
+  color: #5d5f5f !important;
+}
+
+#markhub-dashboard [class*="rounded-none"],
+#layout-workspace-container [class*="rounded-none"],
+.markhub-settings [class*="rounded-none"] {
+  border-radius: 0.75rem !important;
+}
+
+#markhub-dashboard input:not([type="checkbox"]),
+#markhub-dashboard select,
+#markhub-dashboard textarea,
+#layout-workspace-container input:not([type="checkbox"]),
+#layout-workspace-container select,
+#layout-workspace-container textarea,
+.markhub-settings input:not([type="checkbox"]),
+.markhub-settings select,
+.markhub-settings textarea {
+  background: #ffffff !important;
+  border-color: #c4c7c7 !important;
+  color: #1a1c1d !important;
+  border-radius: 0.75rem !important;
+}
+
+#markhub-dashboard input::placeholder,
+#markhub-dashboard textarea::placeholder,
+#layout-workspace-container input::placeholder,
+#layout-workspace-container textarea::placeholder,
+.markhub-settings input::placeholder,
+.markhub-settings textarea::placeholder {
+  color: #747878 !important;
+}
+
+#markhub-dashboard button[class*="bg-white"],
+#layout-workspace-container button[class*="bg-white"],
+.markhub-settings button[class*="bg-white"] {
+  background-color: #000000 !important;
+  border-color: #000000 !important;
+  color: #ffffff !important;
+}
+
+#markhub-dashboard button[class*="bg-white"] svg,
+#layout-workspace-container button[class*="bg-white"] svg,
+.markhub-settings button[class*="bg-white"] svg {
+  color: #ffffff !important;
+}
+
+#markhub-dashboard [class*="hover:bg-[#181818]"]:hover,
+#layout-workspace-container [class*="hover:bg-[#181818]"]:hover,
+.markhub-settings [class*="hover:bg-[#181818]"]:hover,
+#markhub-dashboard [class*="hover:bg-white/"]:hover,
+#layout-workspace-container [class*="hover:bg-white/"]:hover,
+.markhub-settings [class*="hover:bg-white/"]:hover {
+  background-color: #f3f3f5 !important;
+}
+
+#markhub-dashboard pre,
+#layout-workspace-container pre,
+.markhub-settings pre {
+  background: #ffffff !important;
+  border-color: #c4c7c7 !important;
+  color: #444748 !important;
+}
+
+#markhub-dashboard pre code,
+#layout-workspace-container pre code,
+.markhub-settings pre code {
+  color: #2f3132 !important;
+}
+
+#markhub-dashboard .bbox [class*="text-white"],
+#layout-workspace-container .bbox [class*="text-white"],
+#layout-workspace-container .bbox button,
+#layout-workspace-container .bbox button svg {
+  color: #ffffff !important;
+}
+
+#layout-workspace-container #document-canvas-board {
+  border-color: rgba(116, 120, 120, 0.3) !important;
+  box-shadow: 0 24px 80px rgba(47, 49, 50, 0.12) !important;
+}
+
+#layout-workspace-container > header,
+#markhub-dashboard footer {
+  background: rgba(249, 249, 251, 0.88) !important;
+  border-color: rgba(196, 199, 199, 0.75) !important;
+  backdrop-filter: blur(20px);
+}
+
+#layout-workspace-container [class*="shadow-2xl"] {
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.06) !important;
+}

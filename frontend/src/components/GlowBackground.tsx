@@ -23,17 +23,17 @@ export default function GlowBackground() {
   }, []);
 
   return (
-    <div className="absolute inset-0 pointer-events-none overflow-hidden z-0 bg-[#0c0c0c]">
-      {/* Editorial Ambient Glow 1 */}
+    <div className="absolute inset-0 pointer-events-none overflow-hidden z-0 bg-surface-container-low">
+      {/* Luminous ambient glow 1 */}
       <div 
-        className="absolute -bottom-24 -left-24 w-[600px] h-[600px] bg-white/[0.02] rounded-full blur-[140px] transition-transform duration-300 ease-out"
+        className="absolute -bottom-24 -left-24 w-[600px] h-[600px] bg-tertiary-container/10 rounded-full blur-[140px] transition-transform duration-300 ease-out"
         style={{
           transform: `translate(${mousePosition.x}px, ${mousePosition.y}px)`,
         }}
       />
-      {/* Editorial Ambient Glow 2 */}
+      {/* Luminous ambient glow 2 */}
       <div 
-        className="absolute -bottom-48 right-1/4 w-[800px] h-[500px] bg-[#f97316]/[0.02] rounded-full blur-[140px] transition-transform duration-300 ease-out"
+        className="absolute -bottom-48 right-1/4 w-[800px] h-[500px] bg-on-tertiary-container/10 rounded-full blur-[140px] transition-transform duration-300 ease-out"
         style={{
           transform: `translate(${-mousePosition.x * 1.5}px, ${-mousePosition.y * 1.5}px)`,
         }}
