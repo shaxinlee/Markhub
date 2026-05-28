@@ -47,6 +47,7 @@ SECOND_ANNOTATIONS_DIR = DATASETS_DIR / "second_annotations"
 SWIFT_DATASETS_DIR = DATASETS_DIR / "swift_datasets"
 LLAMAFACTORY_DATASETS_DIR = DATASETS_DIR / "llamafactory_datasets"
 PROMPTS_DIR = DATASETS_DIR / "prompt_templates"
+CONVERT_TASKS_DIR = DATASETS_DIR / "convert_tasks"
 PROMPTS_STORE_FILE = PROMPTS_DIR / "prompts.json"
 JOBS_DIR = FIRST_ANNOTATIONS_DIR
 LEGACY_JOBS_DIR = BACKEND_DIR / "jobs"
@@ -82,10 +83,12 @@ ENV_CONFIG_KEYS = [
     "LLM_TIMEOUT",
     "LAYOUT_RENDER_DPI",
     "LAYOUT_MAX_PAGES",
+    "LAYOUT_MAX_PDF_BYTES",
     "QWEN_RESIZE_PRESET",
     "QWEN_RESIZED_WIDTH",
     "QWEN_RESIZED_HEIGHT",
 ]
+DEFAULT_MAX_PDF_BYTES = 200 * 1024 * 1024
 RESIZE_PRESETS = {
     "speed": (1216, 1728),
     "default": (1536, 2176),
@@ -322,6 +325,10 @@ def read_env_file(path: Path = ENV_FILE) -> Dict[str, str]:
             key, value = parsed
             values[key] = value
     return values
+
+
+def max_pdf_bytes() -> int:
+    return clamp_int(os.getenv("LAYOUT_MAX_PDF_BYTES"), default=DEFAULT_MAX_PDF_BYTES, minimum=1024 * 1024, maximum=2 * 1024 * 1024 * 1024)
 
 
 def load_dotenv(path: Path = ENV_FILE) -> None:
@@ -997,6 +1004,7 @@ def env_config() -> Dict[str, str]:
         "has_api_key": "true" if (os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY")) else "false",
         "render_dpi": os.getenv("LAYOUT_RENDER_DPI", "180"),
         "max_pages": os.getenv("LAYOUT_MAX_PAGES", "50"),
+        "max_pdf_bytes": str(max_pdf_bytes()),
         "qwen_preset": os.getenv("QWEN_RESIZE_PRESET", "default"),
         "qwen_width": os.getenv("QWEN_RESIZED_WIDTH", "1536"),
         "qwen_height": os.getenv("QWEN_RESIZED_HEIGHT", "2176"),
@@ -1035,7 +1043,7 @@ def job_dir_for_model(job_id: str, model: str) -> Path:
 
 
 def ensure_dataset_storage() -> None:
-    for path in (FIRST_ANNOTATIONS_DIR, SECOND_ANNOTATIONS_DIR, SWIFT_DATASETS_DIR, LLAMAFACTORY_DATASETS_DIR, PROMPTS_DIR):
+    for path in (FIRST_ANNOTATIONS_DIR, SECOND_ANNOTATIONS_DIR, SWIFT_DATASETS_DIR, LLAMAFACTORY_DATASETS_DIR, PROMPTS_DIR, CONVERT_TASKS_DIR):
         path.mkdir(parents=True, exist_ok=True)
 
 
@@ -1445,6 +1453,9 @@ def start_analysis_job(
     prompt_template: PromptTemplate,
 ) -> Dict[str, Any]:
     clean_old_jobs()
+    limit = max_pdf_bytes()
+    if len(file_bytes) > limit:
+        raise ValueError(f"PDF 文件过大：{len(file_bytes)} bytes，当前上限 {limit} bytes。可通过 LAYOUT_MAX_PDF_BYTES 调整。")
     job_id = uuid.uuid4().hex[:12]
     job_dir = job_dir_for_model(job_id, llm_config.model)
     job_dir.mkdir(parents=True, exist_ok=True)
@@ -1641,6 +1652,44 @@ def write_json_file(path: Path, payload: Any) -> None:
 
 def dataset_state_path(job_id: str) -> Path:
     return dataset_dir(job_id) / "dataset_state.json"
+
+
+def convert_task_path(task_id: str) -> Path:
+    return CONVERT_TASKS_DIR / f"{safe_path_name(task_id)}.json"
+
+
+def write_convert_task(task: Dict[str, Any]) -> None:
+    task_id = str(task.get("task_id") or "")
+    if not task_id:
+        return
+    CONVERT_TASKS[task_id] = task
+    write_json_file(convert_task_path(task_id), task)
+
+
+def update_convert_task(task_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
+    task = CONVERT_TASKS.get(task_id) or read_json_file(convert_task_path(task_id), {})
+    if not isinstance(task, dict) or not task:
+        task = {"task_id": task_id}
+    task.update(updates)
+    write_convert_task(task)
+    return task
+
+
+def read_convert_task(task_id: str) -> Optional[Dict[str, Any]]:
+    task = CONVERT_TASKS.get(task_id)
+    if task:
+        return task
+    task = read_json_file(convert_task_path(task_id), None)
+    if not isinstance(task, dict):
+        return None
+    if task.get("status") == "converting":
+        task["status"] = "failed"
+        task["message"] = "转换任务已中断"
+        task["error"] = "后端服务重启，后台转换线程已停止，请重新发起转换。"
+        write_convert_task(task)
+    else:
+        CONVERT_TASKS[str(task.get("task_id") or task_id)] = task
+    return task
 
 
 def legacy_dataset_state_path(job_id: str) -> Path:
@@ -2003,7 +2052,7 @@ def start_convert_task(body: Dict[str, Any]) -> Dict[str, Any]:
         "skipped_samples": 0,
         "created_at": iso_now(),
     }
-    CONVERT_TASKS[task_id] = task
+    write_convert_task(task)
     for dataset_id in resolved_dataset_ids:
         state = read_dataset_state(str(dataset_id))
         state["convert_status"] = "converting"
@@ -2026,7 +2075,7 @@ def default_convert_output_name(target_format: str, merge: bool) -> str:
 
 
 def run_convert_task(task_id: str, dataset_ids: List[str], target_format: str, merge: bool, split_type: str, output_name: str, overwrite: bool) -> None:
-    task = CONVERT_TASKS[task_id]
+    task = read_convert_task(task_id) or {"task_id": task_id}
     logs: List[str] = []
     output_dir: Optional[Path] = None
     skipped = 0
@@ -2082,7 +2131,7 @@ def run_convert_task(task_id: str, dataset_ids: List[str], target_format: str, m
         (output_dir / "convert_log.txt").write_text(sanitize_saved_text(log_text), encoding="utf-8")
 
         status = "partial_success" if skipped else "success"
-        task.update({"status": status, "output_path": portable_path_ref(output_dir), "message": "转换完成", "skipped_samples": skipped})
+        task = update_convert_task(task_id, {"status": status, "output_path": portable_path_ref(output_dir), "message": "转换完成", "error": "", "skipped_samples": skipped})
         for dataset_id in dataset_ids:
             state = read_dataset_state(dataset_id)
             state["convert_status"] = status
@@ -2103,7 +2152,7 @@ def run_convert_task(task_id: str, dataset_ids: List[str], target_format: str, m
             write_dataset_state(dataset_id, state)
     except Exception as exc:
         error = f"{type(exc).__name__}: {exc}"
-        task.update({"status": "failed", "error": error, "message": "转换失败", "skipped_samples": skipped})
+        update_convert_task(task_id, {"status": "failed", "error": error, "message": "转换失败", "output_path": portable_path_ref(output_dir), "skipped_samples": skipped})
         if output_dir:
             output_dir.mkdir(parents=True, exist_ok=True)
             (output_dir / "convert_log.txt").write_text(sanitize_saved_text("\n".join(logs + [error])), encoding="utf-8")
@@ -2412,7 +2461,7 @@ class LayoutAnalyzerHandler(BaseHTTPRequestHandler):
         convert_match = re.fullmatch(r"/api/datasets/convert/([A-Za-z0-9_-]+)", path)
         if convert_match:
             task_id = convert_match.group(1)
-            task = CONVERT_TASKS.get(task_id)
+            task = read_convert_task(task_id)
             if not task:
                 self.write_json({"error": "convert task not found"}, status=HTTPStatus.NOT_FOUND)
             else:

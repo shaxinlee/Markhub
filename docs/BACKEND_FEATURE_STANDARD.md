@@ -16,7 +16,7 @@ backend/
     <feature_name>/            # 后续新增标注功能
       __init__.py
       ...
-  jobs/                        # 运行时任务结果，忽略提交
+  datasets/                    # 运行时数据，按阶段分目录保存
   static/                      # 后端静态资源
   .env                         # 本地配置和密钥，禁止提交
 ```
@@ -86,9 +86,12 @@ GET  /api/jobs/{job_id}/result
 
 ## 任务存储
 
-- 运行时结果放在 `backend/jobs/`，并保持被 Git 忽略。
-- 新功能应优先使用功能隔离路径，例如 `backend/jobs/<feature_name>/<job_id>/`。
-- 版面分析当前仍使用历史路径 `backend/jobs/{model_dir}/{job_id}`，这是为了兼容已有结果；后续如需迁移，要保留旧路径读取逻辑。
+- 运行时结果统一放在 `backend/datasets/`，并保持被 Git 忽略。
+- 新功能应优先使用功能隔离路径，例如 `backend/datasets/<feature_name>/<stage>/<job_id>/`。
+- 版面分析当前使用 `backend/datasets/first_annotations/{model_dir}/{job_id}` 保存一次标注结果，`backend/datasets/second_annotations/{job_id}` 保存二次标注结果，`backend/datasets/swift_datasets/` 与 `backend/datasets/llamafactory_datasets/` 保存转换结果。
+- 旧版 `backend/jobs/{model_dir}/{job_id}` 仅作为历史读取兼容路径；新写入逻辑不得再保存到 `backend/jobs/`。
+
+保存到 `backend/datasets/` 的 JSON / JSONL / 日志内容不得包含本机绝对路径。仓库内路径应写成 `datasets/...` 或相对导出目录的路径，例如 ms-swift 的图片字段应写成 `images/<dataset>/page_000.png`。
 
 每个任务结果至少应包含：
 

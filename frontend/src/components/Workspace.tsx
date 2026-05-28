@@ -219,22 +219,13 @@ export default function Workspace({
   const activeTemplateName = analysisJob?.prompt_template?.name || promptTemplates.find(t => t.id === promptTemplateId)?.name || '默认模板 1';
 
   useEffect(() => {
-    const initImage = project.images && project.images.length > 0
-      ? project.images[0]
-      : 'https://lh3.googleusercontent.com/aida-public/AB6AXuA8Vg0FsccBPKY0Dqx1Qe7KlonM5GY3dxlAnmDJvmMl0XFhDW8jPgVY8gJEQqh2ca4NTw1tTMzgo8FNVlibPV0_P9ekG5UqCsGmyYCHBRgKN_JSndOr_BuOq2v8f3UK9TDMJTNnAjjAlvX2g2vQ9aHu07ce9mebXb-GWLu-OxKCJkacxAG-TiRIOv3Zy0lR3eI9T5fVoS7hhKfCE9v5pkuUJzDQtO4c8zyal1XqPLg7XvI0l-EZ7T-jxghtTDSQMUPEdmh0HLDnNDg';
-
-    const initialMockSegments: AnnotationSegment[] = [
-      { id: 'seg_1', type: 'doc_title', box: [10, 10, 80, 8], text: 'Q3 Enterprise Solutions Strategy Proposal', confidence: 0.99, pageId: 0, level: 'H1' },
-      { id: 'seg_2', type: 'text', box: [22, 10, 38, 25], text: 'This document outlines the strategic initiatives for scaling enterprise infrastructure over the next fiscal year.', confidence: 0.95, pageId: 0 },
-      { id: 'seg_3', type: 'text', box: [22, 52, 38, 25], text: 'Key objectives include reducing latency, increasing throughput, and establishing unified analytics.', confidence: 0.92, pageId: 0 },
-      { id: 'seg_4', type: 'table', box: [52, 10, 80, 30], text: 'Financial Projections FY24 table region.', confidence: 0.88, pageId: 0 },
-      { id: 'seg_5', type: 'image', box: [85, 10, 40, 10], text: 'Architecture diagram visualization flow.', confidence: 0.76, pageId: 0 }
-    ];
-
-    setDocumentImage(initImage);
-    setSegments(initialMockSegments);
-    setHistory([initialMockSegments]);
+    setDocumentImage(project.images?.[0] || '');
+    setSegments([]);
+    setHistory([[]]);
     setHistoryPointer(0);
+    setAnalysisJob(null);
+    setCurrentPageIndex(0);
+    setSelectedSegmentId(null);
   }, [project]);
 
   useEffect(() => {
