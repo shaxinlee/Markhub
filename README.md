@@ -21,6 +21,7 @@ The current implementation has completed the document layout analysis annotation
 
 - **Dashboard**: shows real annotation jobs as projects.
 - **Datasets**: summarizes completed and running annotation datasets.
+- **Prompt Management**: manages reusable prompts for annotation, review, cleaning, conversion, inference, defaults, versions, and test runs.
 - **Workspace**: currently supports PDF layout analysis, including upload, model configuration, analysis, and page-level review.
 - **Settings**: manages Chinese UI preferences and prompt templates.
 
@@ -29,7 +30,7 @@ The current implementation has completed the document layout analysis annotation
 - **Frontend**: React 19, Vite, TypeScript, Tailwind CSS 4, Motion, Lucide icons.
 - **Frontend server**: Express dev server with `/api` and `/jobs` proxying.
 - **Backend**: Python HTTP server, PyMuPDF, Pillow, OpenAI Python SDK.
-- **Runtime storage**: local files under `backend/jobs/` for generated page images and result JSON.
+- **Runtime storage**: local dataset files under `backend/datasets/`, grouped into `first_annotations/`, `second_annotations/`, `swift_datasets/`, and `llamafactory_datasets/`.
 
 ## Quick Start
 
@@ -85,6 +86,64 @@ Do not commit real `.env` files or API keys. Use `backend/.env.example` as the t
 | `cd frontend && npm run lint` | Run TypeScript checking. |
 | `cd frontend && npm run build` | Build the frontend and server bundle. |
 | `PYTHONPYCACHEPREFIX=/private/tmp/markhub_pycache python3 -m py_compile backend/server.py backend/features/layout_analysis/server.py` | Check backend Python syntax without writing cache files into the repo. |
+| `python3 scripts/convert_markhub_to_msswift.py` | Convert completed `backend/datasets/first_annotations/` layout annotations into an ms-swift multimodal SFT dataset. |
+| `python3 scripts/test_prompt_management_api.py` | Run basic prompt-management behavior checks. |
+
+## Prompt Management
+
+The Prompt Management page provides prompt CRUD, search and filtering, copy, enable/disable, default binding per task, version history, rollback, and test rendering/model execution. Prompt data is stored under `backend/datasets/prompt_templates/` and is exposed through `/api/prompts`.
+
+Enabled layout-analysis prompts are also exposed through the legacy `/api/prompt-templates` contract so existing annotation jobs can select them without changing the current workflow. If a task does not manually select a prompt, the backend uses the enabled default prompt for that task.
+
+## Dataset Conversion And Second Annotation
+
+The datasets page supports selecting completed layout-analysis datasets and converting them in the UI to LLaMA-Factory or ms-swift formats. Data is stored under:
+
+- `backend/datasets/first_annotations/`: first-pass annotation jobs, rendered page images, and result JSON.
+- `backend/datasets/second_annotations/`: second-pass drafts and submitted versions.
+- `backend/datasets/swift_datasets/`: ms-swift conversion outputs.
+- `backend/datasets/llamafactory_datasets/`: LLaMA-Factory conversion outputs.
+
+Conversion output includes:
+
+- `train.jsonl` / `val.jsonl` / `test.jsonl`: generated according to the selected split.
+- `dataset_info.json`: dataset format metadata.
+- `convert_config.json`: source datasets, target format, split, output path, and related settings.
+- `convert_log.txt`: conversion logs and skipped sample counts.
+
+The datasets page also includes a second-annotation workspace for moving, resizing, adding, deleting, relabeling, and editing block text. It supports draft saves, saving as a second-annotation version, and explicit overwrite of the first annotation.
+
+For command-line ms-swift export, run:
+
+```bash
+python3 scripts/convert_markhub_to_msswift.py
+```
+
+The script writes to `backend/datasets/swift_datasets/markhub_layout_msswift_export/` by default:
+
+- `markhub_layout_msswift.jsonl`: ms-swift standard `messages` data, one multimodal SFT sample per page.
+- `images/`: copied page inspection images. The default source is `model_pages`, matching the `0-1000` bbox coordinates in the output.
+
+Common options:
+
+```bash
+python3 scripts/convert_markhub_to_msswift.py \
+  --jobs-dir backend/datasets/first_annotations \
+  --output-dir backend/datasets/swift_datasets/my_export \
+  --dataset-name markhub_layout_msswift \
+  --format jsonl
+```
+
+Train by passing the exported file directly:
+
+```bash
+swift sft \
+  --model Qwen/Qwen2.5-VL-7B-Instruct \
+  --train_type lora \
+  --dataset /path/to/export/markhub_layout_msswift.jsonl
+```
+
+The script writes absolute copied-image paths into `images`, matching ms-swift's recommended multimodal dataset usage.
 
 ## Architecture
 
@@ -95,7 +154,7 @@ Markhub/
     features/
       layout_analysis/     # completed PDF layout-analysis annotation service
     static/index.html      # legacy standalone preview UI
-    jobs/                  # generated runtime results, ignored by Git
+    datasets/              # generated annotations and converted datasets, ignored by Git
   frontend/
     server.ts              # Express/Vite server and backend proxy
     src/App.tsx            # app shell, dashboard routing, settings
@@ -121,7 +180,7 @@ The Python backend exposes a small local API:
 | `GET` | `/api/jobs` | List analysis jobs. |
 | `GET` | `/api/jobs/{job_id}/result` | Read a full job result. |
 | `DELETE` | `/api/jobs/{job_id}` | Delete a local job. |
-| `GET` | `/jobs/...` | Serve generated page images and assets. |
+| `GET` | `/jobs/...` | Serve generated page images and assets from `backend/datasets/first_annotations/`. |
 
 ## Current Status
 

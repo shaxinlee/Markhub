@@ -1,4 +1,5 @@
 .DS_Store
+.review.md/
 
 # Local environment
 .env
@@ -12,7 +13,7 @@ frontend/.env.*
 !frontend/.env.example
 
 # Backend runtime artifacts
-backend/jobs/
+backend/datasets/
 backend/__pycache__/
 __pycache__/
 *.py[cod]
@@ -30,3 +31,4 @@ frontend/*.log
 
 # Local project tools
 .tools/
+.claude/

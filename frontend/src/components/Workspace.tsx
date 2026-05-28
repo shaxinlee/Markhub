@@ -25,9 +25,11 @@ import {
   AlertTriangle,
   FileText,
   RefreshCw,
-  Settings2
+  Settings2,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
-import { Project, AnnotationSegment, BackendBlockType } from '../types';
+import { Project, AnnotationSegment, BackendBlockType, BackendBlock, BackendPage, BackendJob, BackendJobSummary, BackendConfig, PromptTemplateOption } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface WorkspaceProps {
@@ -37,100 +39,63 @@ interface WorkspaceProps {
   onIncreaseAnnotationsCount: (increment: number) => void;
 }
 
-interface PromptTemplateOption {
-  id: string;
-  name: string;
-}
-
-interface BackendConfig {
-  base_url?: string;
-  model?: string;
-  has_api_key?: string;
-  render_dpi?: string;
-  max_pages?: string;
-  qwen_preset?: string;
-  qwen_width?: string;
-  qwen_height?: string;
-  prompt_template_id?: string;
-  timeout?: string;
-}
-
-interface BackendBlock {
-  id: string;
-  text?: string;
-  bbox: [number, number, number, number];
-  page_id: number;
-  block_type: BackendBlockType;
-  weak_heading?: boolean;
-  level?: 'H1' | 'H2' | 'H3' | null;
-}
-
-interface BackendPage {
-  page_id: number;
-  image_url: string;
-  width: number;
-  height: number;
-  status?: string;
-  blocks?: BackendBlock[];
-  error?: string;
-}
-
-interface BackendJob {
-  job_id: string;
-  filename: string;
-  status: string;
-  page_count: number;
-  completed_pages: number;
-  pages: BackendPage[];
-  result?: { blocks?: BackendBlock[]; [key: string]: unknown };
-  warnings?: string[];
-  errors?: string[];
-  config?: { model?: string; base_url?: string; timeout?: string; model_dir?: string };
-  resize?: { preset?: string; width?: number; height?: number };
-  prompt_template?: PromptTemplateOption;
-}
-
-interface BackendJobSummary {
-  job_id: string;
-  filename: string;
-  model?: string;
-  status: string;
-  page_count: number;
-  completed_pages: number;
-  block_count: number;
-  error_count?: number;
-  prompt_template?: PromptTemplateOption;
-}
-
 const BLOCK_TYPES: BackendBlockType[] = [
   'doc_title',
   'paragraph_title',
   'text',
+  'table_of_contents',
   'table',
+  'formula',
+  'chart',
   'figure_title',
   'image',
-  'vision_footnote'
+  'vision_footnote',
+  'header',
+  'footer',
+  'caption',
+  'handwriting',
+  'seal'
 ];
 
 const BLOCK_TYPE_LABELS: Record<BackendBlockType, string> = {
   doc_title: 'Doc Title',
   paragraph_title: 'Paragraph Title',
   text: 'Text',
+  table_of_contents: 'Table of Contents',
   table: 'Table',
+  formula: 'Formula',
+  chart: 'Chart',
   figure_title: 'Figure Title',
   image: 'Image',
-  vision_footnote: 'Footnote'
+  vision_footnote: 'Footnote',
+  header: 'Header',
+  footer: 'Footer',
+  caption: 'Caption',
+  handwriting: 'Handwriting',
+  seal: 'Seal'
 };
 
 const DEFAULT_VISIBLE_TYPES: Record<BackendBlockType, boolean> = {
   doc_title: true,
   paragraph_title: true,
   text: true,
+  table_of_contents: true,
   table: true,
+  formula: true,
+  chart: true,
   figure_title: true,
   image: true,
-  vision_footnote: true
+  vision_footnote: true,
+  header: true,
+  footer: true,
+  caption: true,
+  handwriting: true,
+  seal: true
 };
+
+function normalizeBackendBlockType(type: string): BackendBlockType {
+  return (type === 'list' ? 'table_of_contents' : type) as BackendBlockType;
+}
 
 export default function Workspace({
   project,
@@ -184,26 +149,18 @@ export default function Workspace({
 
   const currentPage = analysisJob?.pages?.[currentPageIndex] || null;
   const displayedPageCount = analysisJob?.page_count || 0;
+  const availablePageCount = analysisJob?.pages?.length || 0;
   const completedPages = analysisJob?.completed_pages || 0;
   const activeTemplateName = analysisJob?.prompt_template?.name || promptTemplates.find(t => t.id === promptTemplateId)?.name || '默认模板 1';
 
   useEffect(() => {
-    const initImage = project.images && project.images.length > 0
-      ? project.images[0]
-      : 'https://lh3.googleusercontent.com/aida-public/AB6AXuA8Vg0FsccBPKY0Dqx1Qe7KlonM5GY3dxlAnmDJvmMl0XFhDW8jPgVY8gJEQqh2ca4NTw1tTMzgo8FNVlibPV0_P9ekG5UqCsGmyYCHBRgKN_JSndOr_BuOq2v8f3UK9TDMJTNnAjjAlvX2g2vQ9aHu07ce9mebXb-GWLu-OxKCJkacxAG-TiRIOv3Zy0lR3eI9T5fVoS7hhKfCE9v5pkuUJzDQtO4c8zyal1XqPLg7XvI0l-EZ7T-jxghtTDSQMUPEdmh0HLDnNDg';
-
-    const initialMockSegments: AnnotationSegment[] = [
-      { id: 'seg_1', type: 'doc_title', box: [10, 10, 80, 8], text: 'Q3 Enterprise Solutions Strategy Proposal', confidence: 0.99, pageId: 0, level: 'H1' },
-      { id: 'seg_2', type: 'text', box: [22, 10, 38, 25], text: 'This document outlines the strategic initiatives for scaling enterprise infrastructure over the next fiscal year.', confidence: 0.95, pageId: 0 },
-      { id: 'seg_3', type: 'text', box: [22, 52, 38, 25], text: 'Key objectives include reducing latency, increasing throughput, and establishing unified analytics.', confidence: 0.92, pageId: 0 },
-      { id: 'seg_4', type: 'table', box: [52, 10, 80, 30], text: 'Financial Projections FY24 table region.', confidence: 0.88, pageId: 0 },
-      { id: 'seg_5', type: 'image', box: [85, 10, 40, 10], text: 'Architecture diagram visualization flow.', confidence: 0.76, pageId: 0 }
-    ];
-
-    setDocumentImage(initImage);
-    setSegments(initialMockSegments);
-    setHistory([initialMockSegments]);
+    setDocumentImage(project.images?.[0] || '');
+    setSegments([]);
+    setHistory([[]]);
     setHistoryPointer(0);
+    setAnalysisJob(null);
+    setCurrentPageIndex(0);
+    setSelectedSegmentId(null);
   }, [project]);
 
   useEffect(() => {
@@ -284,7 +241,7 @@ export default function Workspace({
         const [x1, y1, x2, y2] = block.bbox || [0, 0, page.width, page.height];
         mapped.push({
           id: block.id,
-          type: block.block_type,
+          type: normalizeBackendBlockType(block.block_type),
           box: [
             clampPercent((y1 / Math.max(page.height, 1)) * 100),
             clampPercent((x1 / Math.max(page.width, 1)) * 100),
@@ -318,10 +275,18 @@ export default function Workspace({
       case 'doc_title': return { border: '#3B82F6', bg: 'rgba(59, 130, 246, 0.1)', text: '#3B82F6' };
       case 'paragraph_title': return { border: '#8B5CF6', bg: 'rgba(139, 92, 246, 0.1)', text: '#8B5CF6' };
       case 'text': return { border: '#A78BFA', bg: 'rgba(167, 139, 250, 0.08)', text: '#A78BFA' };
+      case 'table_of_contents': return { border: '#06B6D4', bg: 'rgba(6, 182, 212, 0.09)', text: '#06B6D4' };
       case 'table': return { border: '#10B981', bg: 'rgba(16, 185, 129, 0.1)', text: '#10B981' };
+      case 'formula': return { border: '#F43F5E', bg: 'rgba(244, 63, 94, 0.1)', text: '#F43F5E' };
+      case 'chart': return { border: '#22C55E', bg: 'rgba(34, 197, 94, 0.1)', text: '#22C55E' };
       case 'figure_title': return { border: '#F59E0B', bg: 'rgba(245, 158, 11, 0.1)', text: '#F59E0B' };
       case 'image': return { border: '#EC4899', bg: 'rgba(236, 72, 153, 0.1)', text: '#EC4899' };
       case 'vision_footnote': return { border: '#14B8A6', bg: 'rgba(20, 184, 166, 0.1)', text: '#14B8A6' };
+      case 'header': return { border: '#64748B', bg: 'rgba(100, 116, 139, 0.1)', text: '#64748B' };
+      case 'footer': return { border: '#78716C', bg: 'rgba(120, 113, 108, 0.1)', text: '#78716C' };
+      case 'caption': return { border: '#D946EF', bg: 'rgba(217, 70, 239, 0.1)', text: '#D946EF' };
+      case 'handwriting': return { border: '#F97316', bg: 'rgba(249, 115, 22, 0.1)', text: '#F97316' };
+      case 'seal': return { border: '#EF4444', bg: 'rgba(239, 68, 68, 0.1)', text: '#EF4444' };
       default: return { border: '#747878', bg: 'rgba(116, 120, 120, 0.1)', text: '#747878' };
     }
   };
@@ -386,6 +351,16 @@ export default function Workspace({
   const handleZoomIn = () => setScale(prev => Math.min(prev + 0.1, 1.5));
   const handleZoomOut = () => setScale(prev => Math.max(prev - 0.1, 0.5));
   const handleResetZoom = () => setScale(0.9);
+
+  const goToPage = (nextIndex: number) => {
+    if (!analysisJob?.pages?.length) return;
+    const clampedIndex = Math.max(0, Math.min(nextIndex, analysisJob.pages.length - 1));
+    setCurrentPageIndex(clampedIndex);
+    setSelectedSegmentId(null);
+  };
+
+  const goToPreviousPage = () => goToPage(currentPageIndex - 1);
+  const goToNextPage = () => goToPage(currentPageIndex + 1);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -758,13 +733,19 @@ export default function Workspace({
           )}
 
           {analysisJob?.pages?.length ? (
-            <div className="absolute top-4 left-4 z-20 flex items-center gap-2 bg-[#0c0c0c]/90 border border-white/10 px-3 py-2 text-[10px] font-mono text-white/70">
-              <FileText className="w-3.5 h-3.5" />
-              <select value={currentPageIndex} onChange={(e) => setCurrentPageIndex(Number(e.target.value))} className="bg-transparent text-white focus:outline-none">
+            <div className="absolute top-4 left-4 z-20 flex w-[260px] items-center gap-2 bg-[#0c0c0c]/90 border border-white/10 px-3 py-2 text-[10px] font-mono text-white/70">
+              <FileText className="h-3.5 w-3.5 shrink-0" />
+              <button onClick={goToPreviousPage} disabled={currentPageIndex <= 0} className="flex h-6 w-6 shrink-0 items-center justify-center text-white/70 hover:text-white disabled:cursor-not-allowed disabled:text-white/20" title="上一页">
+                <ChevronLeft className="h-3.5 w-3.5" />
+              </button>
+              <select value={currentPageIndex} onChange={(e) => goToPage(Number(e.target.value))} className="min-w-0 flex-1 bg-transparent text-white focus:outline-none">
                 {analysisJob.pages.map((page, idx) => (
                   <option key={page.page_id} value={idx}>Page {page.page_id + 1} · {page.status || 'pending'}</option>
                 ))}
               </select>
+              <button onClick={goToNextPage} disabled={currentPageIndex >= availablePageCount - 1} className="flex h-6 w-6 shrink-0 items-center justify-center text-white/70 hover:text-white disabled:cursor-not-allowed disabled:text-white/20" title="下一页">
+                <ChevronRight className="h-3.5 w-3.5" />
+              </button>
             </div>
           ) : selectedFile ? (
             <div className="absolute top-4 left-4 z-20 bg-[#0c0c0c]/90 border border-white/10 px-3 py-2 text-[10px] font-mono text-white/60">
@@ -836,6 +817,12 @@ export default function Workspace({
           <div className="absolute bottom-8 left-1/2 -translate-x-1/2 bg-[#0c0c0c]/90 border border-white/10 backdrop-blur-md px-5 py-2.5 flex items-center gap-3 shadow-2xl z-25 select-none rounded-none text-white shadow-black/60">
             <button onClick={handleUndo} disabled={historyPointer <= 0} className={`p-2 rounded-none transition-colors flex items-center justify-center ${historyPointer <= 0 ? 'text-white/20' : 'text-white hover:bg-white/5'}`} title="Undo Action"><Undo2 className="w-4 h-4" /></button>
             <button onClick={handleRedo} disabled={historyPointer >= history.length - 1} className={`p-2 rounded-none transition-colors flex items-center justify-center ${historyPointer >= history.length - 1 ? 'text-white/20' : 'text-white hover:bg-white/5'}`} title="Redo Action"><Redo2 className="w-4 h-4" /></button>
+            <div className="w-px h-5 bg-white/10 mx-1" />
+            <button onClick={goToPreviousPage} disabled={!availablePageCount || currentPageIndex <= 0} className={`p-2 rounded-none transition-colors flex items-center justify-center ${!availablePageCount || currentPageIndex <= 0 ? 'text-white/20' : 'text-white/70 hover:text-white hover:bg-white/5'}`} title="上一页"><ChevronLeft className="w-4 h-4" /></button>
+            <span className="w-[72px] shrink-0 text-center text-[10px] font-mono font-bold text-white">
+              {availablePageCount ? `${currentPageIndex + 1}/${availablePageCount}` : '-/-'}
+            </span>
+            <button onClick={goToNextPage} disabled={!availablePageCount || currentPageIndex >= availablePageCount - 1} className={`p-2 rounded-none transition-colors flex items-center justify-center ${!availablePageCount || currentPageIndex >= availablePageCount - 1 ? 'text-white/20' : 'text-white/70 hover:text-white hover:bg-white/5'}`} title="下一页"><ChevronRight className="w-4 h-4" /></button>
             <div className="w-px h-5 bg-white/10 mx-1" />
             <button onClick={handleZoomOut} className="p-2 text-white/70 hover:text-white hover:bg-white/5 rounded-none transition-colors flex items-center justify-center" title="Zoom Out"><ZoomOut className="w-4 h-4" /></button>
             <span className="text-[10px] font-mono font-bold text-white min-w-[40px] text-center">{Math.round(scale * 100)}%</span>
