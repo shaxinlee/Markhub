@@ -13,6 +13,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "backend"))
 
 from features.layout_analysis import server as s  # noqa: E402
+from features.layout_analysis import prompts_store as ps  # noqa: E402
 
 
 def assert_true(value: object, message: str) -> None:
@@ -22,7 +23,9 @@ def assert_true(value: object, message: str) -> None:
 
 def main() -> int:
     with tempfile.TemporaryDirectory() as tmp:
-        s.PROMPTS_STORE_FILE = Path(tmp) / "prompts.json"
+        store_path = Path(tmp) / "prompts.json"
+        s.PROMPTS_STORE_FILE = store_path
+        ps.PROMPTS_STORE_FILE = store_path
 
         created = s.create_prompt(
             {

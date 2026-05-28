@@ -29,7 +29,7 @@ import {
   ChevronLeft,
   ChevronRight
 } from 'lucide-react';
-import { Project, AnnotationSegment, BackendBlockType } from '../types';
+import { Project, AnnotationSegment, BackendBlockType, BackendBlock, BackendPage, BackendJob, BackendJobSummary, BackendConfig, PromptTemplateOption } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface WorkspaceProps {
@@ -37,71 +37,6 @@ interface WorkspaceProps {
   onGoBack: () => void;
   onUpdateProjectProgress: (projectId: string, progress: number) => void;
   onIncreaseAnnotationsCount: (increment: number) => void;
-}
-
-interface PromptTemplateOption {
-  id: string;
-  name: string;
-}
-
-interface BackendConfig {
-  base_url?: string;
-  model?: string;
-  has_api_key?: string;
-  render_dpi?: string;
-  max_pages?: string;
-  qwen_preset?: string;
-  qwen_width?: string;
-  qwen_height?: string;
-  prompt_template_id?: string;
-  timeout?: string;
-}
-
-interface BackendBlock {
-  id: string;
-  text?: string;
-  bbox: [number, number, number, number];
-  page_id: number;
-  block_type: BackendBlockType;
-  weak_heading?: boolean;
-  level?: 'H1' | 'H2' | 'H3' | null;
-}
-
-interface BackendPage {
-  page_id: number;
-  image_url: string;
-  width: number;
-  height: number;
-  status?: string;
-  blocks?: BackendBlock[];
-  error?: string;
-}
-
-interface BackendJob {
-  job_id: string;
-  filename: string;
-  status: string;
-  page_count: number;
-  completed_pages: number;
-  pages: BackendPage[];
-  result?: { blocks?: BackendBlock[]; [key: string]: unknown };
-  warnings?: string[];
-  errors?: string[];
-  config?: { model?: string; base_url?: string; timeout?: string; model_dir?: string };
-  resize?: { preset?: string; width?: number; height?: number };
-  prompt_template?: PromptTemplateOption;
-}
-
-interface BackendJobSummary {
-  job_id: string;
-  filename: string;
-  model?: string;
-  status: string;
-  page_count: number;
-  completed_pages: number;
-  block_count: number;
-  error_count?: number;
-  prompt_template?: PromptTemplateOption;
 }
 
 const BLOCK_TYPES: BackendBlockType[] = [
