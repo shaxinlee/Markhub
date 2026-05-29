@@ -663,7 +663,10 @@ def _upgrade_builtin_default_prompt() -> None:
         if not isinstance(prompt, dict) or prompt.get("id") != DEFAULT_PROMPT_TEMPLATE_ID or prompt.get("deleted_at"):
             continue
         notes = str(prompt.get("notes") or "")
-        if BUILTIN_LAYOUT_PROMPT_REVISION in notes and prompt.get("content") == LAYOUT_PROMPT:
+        # Re-seed the shipped content only when the builtin revision changes.
+        # Once a store carries the current revision we leave its content alone,
+        # so manual edits to the default prompt survive restarts.
+        if BUILTIN_LAYOUT_PROMPT_REVISION in notes:
             return
         prompt["description"] = "系统内置的文档版面分析 Prompt，主动识别标题、正文、目录、表格、公式、图表、图片、页眉页脚、脚注、手写字和印章。"
         prompt["content"] = LAYOUT_PROMPT
@@ -671,7 +674,7 @@ def _upgrade_builtin_default_prompt() -> None:
         prompt["version"] = next_prompt_version(str(prompt.get("version") or "v1.0"))
         prompt["updated_at"] = prompt_now()
         prompt["notes"] = f"系统默认提示词，可复制后创建自定义版本。revision={BUILTIN_LAYOUT_PROMPT_REVISION}"
-        prompt.setdefault("versions", []).append(version_record(prompt, "升级内置默认提示词：将 list 标签替换为 table_of_contents 目录标签", "system"))
+        prompt.setdefault("versions", []).append(version_record(prompt, f"升级内置默认提示词到 {BUILTIN_LAYOUT_PROMPT_REVISION}", "system"))
         log_prompt_operation(prompt, "upgrade", f"升级到 {BUILTIN_LAYOUT_PROMPT_REVISION}", "system")
         changed = True
         break

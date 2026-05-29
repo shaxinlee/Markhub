@@ -1,8 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import {
-  Bell,
   Boxes,
-  BriefcaseBusiness,
   ChevronDown,
   CircleHelp,
   Clock3,
@@ -11,17 +9,13 @@ import {
   FileText,
   Filter,
   FolderOpen,
-  Grid2X2,
   Image,
-  LogOut,
   Menu,
   Plus,
   RefreshCw,
   Search,
   SquareCheckBig,
   Trash2,
-  UserCircle,
-  Wrench,
   X
 } from 'lucide-react';
 import { AnnotationFeature, BackendJobSummary } from '../types';
@@ -29,7 +23,6 @@ import { motion, AnimatePresence } from 'motion/react';
 
 interface DatasetsPageProps {
   jobs: BackendJobSummary[];
-  onNavigate: (tab: 'projects' | 'datasets' | 'prompts' | 'analytics' | 'team' | 'settings') => void;
   onCreateDataset: (feature: AnnotationFeature) => void;
   onOpenDataset: (jobId: string) => void;
   onSecondAnnotate: (datasetId: string) => void;
@@ -104,7 +97,7 @@ const DATASET_TYPE_OPTIONS: Array<{
   },
 ];
 
-export default function DatasetsPage({ jobs, onNavigate, onCreateDataset, onOpenDataset, onSecondAnnotate, onRefreshDatasets }: DatasetsPageProps) {
+export default function DatasetsPage({ jobs, onCreateDataset, onOpenDataset, onSecondAnnotate, onRefreshDatasets }: DatasetsPageProps) {
   const [activeCategory, setActiveCategory] = useState<DatasetCategory>('All');
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'All' | DatasetStatus>('All');
@@ -244,68 +237,8 @@ export default function DatasetsPage({ jobs, onNavigate, onCreateDataset, onOpen
   }
 
   return (
-    <div className="min-h-full w-full overflow-hidden bg-surface-container-low text-primary font-['Inter']">
-      <div className="pointer-events-none absolute bottom-0 left-0 right-0 h-[400px] bg-gradient-to-t from-on-tertiary-container/10 via-primary/5 to-transparent blur-[120px]" />
-
-      <nav className="sticky top-0 z-50 mx-auto flex h-16 w-full max-w-[1920px] items-center justify-between border-b border-outline-variant/30 bg-surface/80 px-container-desktop backdrop-blur-xl">
-        <div className="flex items-center gap-8">
-          <button onClick={() => onNavigate('projects')} className="text-headline-md font-bold tracking-tight text-primary active:scale-95 transition-transform">
-            MarkHub
-          </button>
-          <div className="hidden items-center gap-6 md:flex">
-            <TopNavButton label="Projects" active={false} onClick={() => onNavigate('projects')} />
-            <TopNavButton label="Datasets" active onClick={() => onNavigate('datasets')} />
-            <TopNavButton label="Prompts" active={false} onClick={() => onNavigate('prompts')} />
-            <TopNavButton label="Analytics" active={false} onClick={() => onNavigate('analytics')} />
-            <TopNavButton label="Team" active={false} onClick={() => onNavigate('team')} />
-            <TopNavButton label="Settings" active={false} onClick={() => onNavigate('settings')} />
-          </div>
-        </div>
-
-        <div className="flex items-center gap-4">
-          <div className="relative hidden lg:block">
-            <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-on-surface-variant" />
-            <input
-              value={searchTerm}
-              onChange={(event) => setSearchTerm(event.target.value)}
-              className="h-12 w-80 rounded-full border border-outline-variant/50 bg-surface-container py-2 pl-10 pr-4 text-body-md text-on-surface-variant outline-none transition-colors focus:border-primary focus:ring-0"
-              placeholder="Search datasets..."
-              type="search"
-            />
-          </div>
-          <button className="rounded-full p-2 text-on-surface-variant transition-colors hover:bg-surface-container hover:text-primary active:scale-95" aria-label="Notifications">
-            <Bell className="h-6 w-6" />
-          </button>
-          <button className="rounded-full p-2 text-on-surface-variant transition-colors hover:bg-surface-container hover:text-primary active:scale-95" aria-label="Account">
-            <UserCircle className="h-6 w-6" />
-          </button>
-        </div>
-      </nav>
-
+    <div className="min-h-full w-full overflow-hidden bg-surface-container-low text-primary">
       <div className="mx-auto flex max-w-[1920px]">
-        <aside className="sticky top-16 hidden h-[calc(100vh-4rem)] w-64 shrink-0 flex-col gap-4 border-r border-outline-variant/30 bg-surface p-gutter md:flex">
-          <div className="mb-4 flex items-center gap-3 px-2">
-            <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border border-outline-variant/30 bg-surface-container-high text-primary">
-              <BriefcaseBusiness className="h-5 w-5" />
-            </div>
-            <div>
-              <div className="w-40 truncate text-label-md font-bold text-primary">Enterprise Workspace</div>
-              <div className="text-label-sm font-semibold text-on-surface-variant">Data Science Lab</div>
-            </div>
-          </div>
-
-          <div className="flex flex-1 flex-col gap-2">
-            <SideNavButton icon={<Grid2X2 className="h-5 w-5" />} label="Dashboard" />
-            <SideNavButton icon={<FileText className="h-5 w-5" />} label="Tasks" />
-            <SideNavButton icon={<Wrench className="h-5 w-5" />} label="Tools" />
-            <SideNavButton icon={<CircleHelp className="h-5 w-5" />} label="Help" />
-          </div>
-
-          <div className="mt-auto border-t border-outline-variant/30 pt-4">
-            <SideNavButton icon={<LogOut className="h-5 w-5" />} label="Log out" />
-          </div>
-        </aside>
-
         <main className="flex-1 overflow-y-auto p-gutter md:p-[40px]">
           <div className="mx-auto max-w-7xl space-y-[40px]">
             <section className="relative overflow-hidden rounded-[1.5rem] border border-surface-variant bg-surface-container-lowest p-[32px] shadow-[0_20px_50px_rgba(0,0,0,0.02)] md:p-[40px]">
@@ -588,7 +521,7 @@ export default function DatasetsPage({ jobs, onNavigate, onCreateDataset, onOpen
                           {option.description}
                         </span>
                       </span>
-                      <span className={`shrink-0 rounded-full px-2.5 py-1 text-label-sm font-semibold ${available ? 'bg-white/15 text-white' : 'bg-surface-container-high text-on-surface-variant'}`}>
+                      <span className={`shrink-0 rounded-full px-2.5 py-1 text-label-sm font-semibold ${available ? 'bg-on-primary/15 text-on-primary' : 'bg-surface-container-high text-on-surface-variant'}`}>
                         {available ? '可用' : '待开发'}
                       </span>
                     </button>
@@ -600,28 +533,6 @@ export default function DatasetsPage({ jobs, onNavigate, onCreateDataset, onOpen
         )}
       </AnimatePresence>
     </div>
-  );
-}
-
-function TopNavButton({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      className={`text-label-md font-medium transition-all duration-200 active:scale-95 ${
-        active ? 'border-b-2 border-primary pb-1 font-bold text-primary' : 'text-on-surface-variant hover:text-primary'
-      }`}
-    >
-      {label}
-    </button>
-  );
-}
-
-function SideNavButton({ icon, label }: { icon: React.ReactNode; label: string }) {
-  return (
-    <button className="flex items-center gap-3 rounded-[0.75rem] px-4 py-3 text-on-surface-variant transition-all duration-200 hover:bg-surface-container-high active:scale-[0.98]">
-      {icon}
-      <span className="text-label-md font-medium">{label}</span>
-    </button>
   );
 }
 

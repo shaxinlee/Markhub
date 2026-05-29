@@ -29,7 +29,7 @@ BLOCK_TYPES = {
     "seal",
 }
 BLOCK_TYPE_ALIASES = {"list": "table_of_contents"}
-LEVELS = {"H1", "H2", "H3"}
+LEVELS = {"H1", "H2", "H3", "H4"}
 
 DEFAULT_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 DEFAULT_MODEL = ""
@@ -53,7 +53,7 @@ RESIZE_PRESETS = {
 }
 
 DEFAULT_PROMPT_TEMPLATE_ID = "default_template_1"
-BUILTIN_LAYOUT_PROMPT_REVISION = "layout_prompt_v20260528_toc_strict_watermark"
+BUILTIN_LAYOUT_PROMPT_REVISION = "layout_prompt_v20260530_h4_levels"
 PROMPT_TEMPLATE_CATEGORIES = {"bounding_box", "polygon", "layout", "keypoints", "text_transcription"}
 PROMPT_TYPES = {
     "data_annotation",

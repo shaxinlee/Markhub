@@ -3,30 +3,24 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
-import { 
-  LayoutDashboard, 
-  ClipboardList, 
-  Wrench, 
-  HelpCircle, 
-  Search, 
-  Plus, 
-  ChevronRight, 
-  Users, 
-  Layers, 
-  Square, 
-  Spline, 
-  Grid3X3, 
-  Crosshair, 
-  FileText,
-  FileEdit,
+import React, { useMemo, useState } from 'react';
+import {
   ArrowUpRight,
-  Database,
   CheckCircle,
-  X
+  Crosshair,
+  Database,
+  FileEdit,
+  FileText,
+  Grid3X3,
+  Plus,
+  Search,
+  Spline,
+  Square,
+  Users,
+  X,
 } from 'lucide-react';
-import { AnnotationFeature, Project, Collaborator } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
+import { AnnotationFeature, Project, Collaborator } from '../types';
 
 interface DashboardProps {
   projects: Project[];
@@ -41,61 +35,58 @@ interface DashboardProps {
   };
 }
 
+const ANNOTATION_FEATURES: Array<{
+  id: AnnotationFeature;
+  label: string;
+  description: string;
+  status: 'online' | 'coming_soon';
+  icon: React.ReactNode;
+}> = [
+  { id: 'layout', label: '版面分析标注', description: 'PDF 页面渲染、版面块识别、人工修正。', status: 'online', icon: <Grid3X3 className="h-4 w-4" /> },
+  { id: 'bounding_box', label: '目标框标注', description: '通用矩形框标注能力。', status: 'coming_soon', icon: <Square className="h-4 w-4" /> },
+  { id: 'polygon', label: '多边形分割', description: '复杂区域轮廓标注。', status: 'coming_soon', icon: <Spline className="h-4 w-4" /> },
+  { id: 'keypoints', label: '关键点标注', description: '结构点位和姿态类任务。', status: 'coming_soon', icon: <Crosshair className="h-4 w-4" /> },
+  { id: 'text_transcription', label: '文本转录', description: '图片文字转写和校验。', status: 'coming_soon', icon: <FileEdit className="h-4 w-4" /> },
+];
+
 export default function Dashboard({
   projects,
   collaborators,
   onCreateProject,
   onSelectProject,
   onOpenAnnotationFeature,
-  stats
+  stats,
 }: DashboardProps) {
   const [isNewProjectModalOpen, setIsNewProjectModalOpen] = useState(false);
   const [isCollaboratorsOpen, setIsCollaboratorsOpen] = useState(false);
   const [isEnterpriseModalOpen, setIsEnterpriseModalOpen] = useState(false);
-  
-  // New Project Form state
   const [newProjName, setNewProjName] = useState('');
   const [newProjDesc, setNewProjDesc] = useState('');
   const [newProjType, setNewProjType] = useState<'CV' | 'Multimodal' | 'Keypoints' | 'NLP'>('CV');
   const [newProjCategory, setNewProjCategory] = useState('Layout Analysis');
-  
-  // Filter search
   const [searchTerm, setSearchTerm] = useState('');
 
-  const filteredProjects = projects.filter(p => 
-    p.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    p.category.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredProjects = useMemo(() => {
+    const keyword = searchTerm.trim().toLowerCase();
+    if (!keyword) return projects;
+    return projects.filter((project) => {
+      return `${project.name} ${project.category} ${project.description}`.toLowerCase().includes(keyword);
+    });
+  }, [projects, searchTerm]);
 
-  const annotationFeatures: Array<{
-    id: AnnotationFeature;
-    label: string;
-    status: 'online' | 'coming_soon';
-    icon: React.ReactNode;
-  }> = [
-    { id: 'bounding_box', label: 'Bounding Box', status: 'coming_soon', icon: <Square className="w-4 h-4" /> },
-    { id: 'polygon', label: 'Polygon Segment', status: 'coming_soon', icon: <Spline className="w-4 h-4" /> },
-    { id: 'layout', label: 'Layout Analysis', status: 'online', icon: <Grid3X3 className="w-4 h-4" /> },
-    { id: 'keypoints', label: 'Keypoints Picker', status: 'coming_soon', icon: <Crosshair className="w-4 h-4" /> },
-    { id: 'text_transcription', label: 'Text Transcription', status: 'coming_soon', icon: <FileEdit className="w-4 h-4" /> },
-  ];
-
-  const handleCreateSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleCreateSubmit = (event: React.FormEvent) => {
+    event.preventDefault();
     if (!newProjName.trim()) return;
-
     onCreateProject({
-      name: newProjName,
-      description: newProjDesc || 'Custom document analysis dataset labeling project.',
+      name: newProjName.trim(),
+      description: newProjDesc.trim() || '自定义文档版面分析标注项目。',
       type: newProjType,
       progress: 0,
-      thumbnail: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=500&q=80',
+      thumbnail: '',
       totalImages: 1,
       totalAnnotations: 0,
       category: newProjCategory,
     });
-
-    // Reset fields
     setNewProjName('');
     setNewProjDesc('');
     setNewProjType('CV');
@@ -104,470 +95,346 @@ export default function Dashboard({
   };
 
   return (
-    <div id="markhub-dashboard" className="flex flex-1 overflow-hidden relative bg-[#0c0c0c] text-[#e5e5e5]">
-      
-      {/* Sidebar (SideNavBar) */}
-      <aside className="w-20 bg-[#0e0e0e] border-r border-white/10 flex flex-col items-center py-10 space-y-12 h-full select-none z-10">
-        <div 
-          className="p-3 text-white bg-white/10 border border-white/5 rounded-none transition-all active:scale-95 cursor-pointer hover:bg-white/15"
-          title="Dashboard"
-        >
-          <LayoutDashboard className="w-5 h-5" />
-        </div>
-        <div 
-          onClick={() => setIsCollaboratorsOpen(true)}
-          className="p-3 text-white/50 hover:bg-white/5 hover:text-white rounded-none border border-transparent hover:border-white/10 transition-all cursor-pointer"
-          title="Team Members"
-        >
-          <Users className="w-5 h-5" />
-        </div>
-        <div
-          className="p-3 text-white/50 hover:bg-white/5 hover:text-white rounded-none border border-transparent hover:border-white/10 transition-all cursor-pointer"
-          title="Backend Dataset Records"
-        >
-          <Database className="w-5 h-5" />
-        </div>
-        <div 
-          onClick={() => setIsEnterpriseModalOpen(true)}
-          className="p-3 text-white/50 hover:bg-white/5 hover:text-white rounded-none border border-transparent hover:border-white/10 transition-all cursor-pointer"
-          title="Enterprise Info"
-        >
-          <HelpCircle className="w-5 h-5" />
-        </div>
-      </aside>
-
-      {/* Primary Area divided into left project content and right annotation panel */}
-      <div className="flex-1 flex overflow-hidden">
-        
-        {/* Project Content list */}
-        <section className="flex-1 overflow-y-auto custom-scrollbar px-12 py-12 space-y-12 bg-[#0c0c0c]">
-          
-          {/* Header Hero Section */}
-          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-            <div>
-              <h1 className="font-serif italic text-4xl leading-tight text-white tracking-tight">
-                Manage Your Data Pipeline and Annotation Projects
-              </h1>
-              <p className="text-white/60 text-sm font-serif italic max-w-2xl mt-3 leading-relaxed tracking-wider">
-                Precision labeling tools for industrial AI datasets. Connect, annotate, and deploy layouts instantly.
-              </p>
-            </div>
-          </div>
-
-          {/* Search Row */}
-          <div className="flex items-center gap-4 bg-white/[0.03] border border-white/10 px-4 py-2.5 rounded-none max-w-md focus-within:border-white/30 transition-all">
-            <Search className="w-5 h-5 text-white/50" />
-            <input 
-              type="text" 
-              placeholder="Search datasets or project tags..." 
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="flex-1 bg-transparent border-none outline-none text-xs text-white tracking-widest placeholder-white/20 uppercase"
-            />
-          </div>
-
-          {/* KPI Dashboard Indicators */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            <div className="p-8 border border-white/5 rounded-none bg-[#141414] transition-all hover:bg-[#181818] hover:border-white/20 group select-none">
-              <div className="flex justify-between items-center text-white/50">
-                <span className="text-[10px] uppercase tracking-[0.3em] font-semibold">Total Pages</span>
-                <span className="text-[9px] uppercase tracking-[0.2em] text-[#fa5252] opacity-0 group-hover:opacity-100 transition-opacity">Backend synced</span>
+    <section id="markhub-dashboard" className="w-full overflow-y-auto bg-surface-container-low p-gutter text-on-surface md:p-[40px]">
+      <div className="mx-auto grid max-w-7xl gap-8 xl:grid-cols-[minmax(0,1fr)_340px]">
+        <div className="space-y-[40px]">
+          <section className="rounded-[1.5rem] border border-surface-variant bg-surface-container-lowest p-[32px] shadow-[0_20px_50px_rgba(0,0,0,0.02)] md:p-[40px]">
+            <div className="mb-10 flex flex-col justify-between gap-6 md:flex-row md:items-end">
+              <div>
+                <span className="text-label-sm font-bold uppercase tracking-[0.24em] text-on-surface-variant">Project Workspace</span>
+                <h1 className="mt-3 text-headline-lg font-semibold text-primary">项目</h1>
+                <p className="mt-2 max-w-2xl text-body-md text-on-surface-variant">
+                  统一查看后端已处理数据集、进入标注工作台，并创建新的版面分析任务。
+                </p>
               </div>
-              <div className="font-serif italic text-5xl mt-4 leading-none tracking-tight text-white">
-                {stats.totalImages.toLocaleString()}
+              <div className="flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={() => setIsCollaboratorsOpen(true)}
+                  className="flex items-center gap-2 rounded-[0.75rem] border border-outline-variant/50 bg-surface-container-lowest px-4 py-3 text-label-md font-semibold text-primary transition-colors hover:bg-surface-container"
+                >
+                  <Users className="h-4 w-4" />
+                  团队
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsNewProjectModalOpen(true)}
+                  className="flex items-center gap-2 rounded-[0.75rem] bg-primary px-5 py-3 text-label-md font-semibold text-on-primary transition-colors hover:bg-primary/90"
+                >
+                  <Plus className="h-4 w-4" />
+                  新建项目
+                </button>
               </div>
             </div>
 
-            <div 
-              className="p-8 border border-white/5 rounded-none bg-[#141414] hover:bg-[#181818] transition-all"
-            >
-              <span className="text-white/50 text-[10px] uppercase tracking-[0.3em] font-semibold">Layout Blocks</span>
-              <div className="font-serif italic text-5xl mt-4 leading-none tracking-tight text-white">
-                {stats.totalAnnotations}
-              </div>
+            <div className="mb-10 grid grid-cols-1 gap-6 md:grid-cols-3">
+              <MetricCard label="总页数" value={stats.totalImages.toLocaleString()} note="Backend synced" />
+              <MetricCard label="版面块" value={stats.totalAnnotations} note="Layout blocks" />
+              <MetricCard label="数据集" value={stats.activeCollaborators.toLocaleString()} note="Synced list" />
             </div>
 
-            <div className="p-8 border border-white/5 rounded-none bg-[#141414] hover:bg-[#181818] transition-all hover:border-white/20 group">
-              <div className="flex justify-between items-center">
-                <span className="text-white/50 text-[10px] uppercase tracking-[0.3em] font-semibold">Datasets</span>
-                <span className="text-[9px] uppercase tracking-[0.2em] text-[#fa5252] opacity-0 group-hover:opacity-100 transition-opacity">Synced list</span>
+            <div className="mb-8 flex flex-col justify-between gap-4 border-b border-surface-variant pb-4 md:flex-row md:items-center">
+              <div className="relative w-full md:max-w-md">
+                <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-on-surface-variant" />
+                <input
+                  value={searchTerm}
+                  onChange={(event) => setSearchTerm(event.target.value)}
+                  className="h-12 w-full rounded-[0.75rem] border border-outline-variant/50 bg-surface-container py-3 pl-10 pr-4 text-body-md outline-none transition-colors placeholder:text-on-surface-variant focus:border-primary"
+                  placeholder="搜索项目或数据集"
+                  type="search"
+                />
               </div>
-              <div className="font-serif italic text-5xl mt-4 leading-none tracking-tight text-white">
-                {stats.activeCollaborators}
-              </div>
-            </div>
-          </div>
-
-          {/* Recent Projects List Grid */}
-          <div className="space-y-6">
-            <div className="flex justify-between items-center border-b border-white/5 pb-4">
-              <h2 className="font-serif italic text-2xl text-white tracking-tight">Recent Projects</h2>
-              <span className="text-[10px] uppercase tracking-[0.25em] text-white/40 bg-white/5 border border-white/10 px-3.5 py-1 font-semibold">
-                {filteredProjects.length} Active Dataset{filteredProjects.length !== 1 ? 's' : ''}
+              <span className="text-label-md font-semibold text-on-surface-variant">
+                {filteredProjects.length} 个项目
               </span>
             </div>
 
             {filteredProjects.length === 0 ? (
-              <div className="text-center py-20 border border-white/10 rounded-none bg-[#141414] px-6">
-                <p className="text-white/60 text-sm italic font-serif">
-                  {projects.length === 0 ? 'No backend datasets found. Run a PDF analysis first.' : 'No annotation projects matched your search.'}
-                </p>
-                <button 
-                  onClick={() => setSearchTerm('')}
-                  className="mt-4 text-[10px] text-white uppercase tracking-[0.2em] underline font-bold"
-                >
-                  Clear search filters
-                </button>
-              </div>
+              <EmptyState
+                title={projects.length === 0 ? '还没有后端数据集' : '没有匹配的项目'}
+                description={projects.length === 0 ? '进入版面分析标注工作台，上传 PDF 并启动分析后会自动生成项目记录。' : '调整搜索关键词后再试。'}
+                actionLabel={projects.length === 0 ? '开始版面分析' : '清空搜索'}
+                onAction={() => projects.length === 0 ? onOpenAnnotationFeature('layout') : setSearchTerm('')}
+              />
             ) : (
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                {filteredProjects.map((proj) => (
-                  <div 
-                    key={proj.id}
-                    onClick={() => onSelectProject(proj)}
-                    className="group bg-[#141414] border border-white/5 px-6 py-6 flex gap-6 cursor-pointer hover:bg-[#181818] hover:border-white/20 transition-all rounded-none relative"
-                  >
-                    {/* Project Image Panel */}
-                    <div className="w-28 h-28 rounded-none bg-black overflow-hidden flex-shrink-0 border border-white/10 relative">
-                      {proj.thumbnail ? (
-                        <img
-                          src={proj.thumbnail}
-                          alt={`${proj.name} first analyzed page`}
-                          referrerPolicy="no-referrer"
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
-                        />
-                      ) : (
-                        <div className="flex h-full w-full items-center justify-center bg-white/[0.03] text-white/35">
-                          <FileText className="h-9 w-9" />
-                        </div>
-                      )}
-                      <div className="absolute inset-0 bg-black/45 group-hover:bg-black/10 duration-500" />
-                    </div>
-
-                    {/* Project text details */}
-                    <div className="flex-1 flex flex-col justify-between">
-                      <div>
-                        <div className="flex justify-between items-center">
-                          <span className="px-2 py-0.5 bg-white/10 border border-white/10 text-[9px] font-mono tracking-wider text-white/80">
-                            {proj.type}
-                          </span>
-                          <span className="text-[10px] text-white/40 uppercase tracking-[0.15em] font-semibold">
-                            {proj.category}
-                          </span>
-                        </div>
-                        <h3 className="font-serif italic text-lg mt-2.5 text-white group-hover:text-white/80 transition-colors leading-tight line-clamp-1">
-                          {proj.name}
-                        </h3>
-                        <p className="text-xs text-white/50 mt-1.5 leading-relaxed line-clamp-1">
-                          {proj.description}
-                        </p>
-                      </div>
-
-                      {/* Progress Metrics bar */}
-                      <div className="space-y-2 mt-3">
-                        <div className="flex justify-between text-[10px] uppercase tracking-[0.15em] text-white/40 font-semibold">
-                          <span>Completion Progress</span>
-                          <span className="font-mono text-white/80">{proj.progress}%</span>
-                        </div>
-                        <div className="w-full h-1 bg-white/5 rounded-none overflow-hidden">
-                          <div 
-                            className="h-full bg-white transition-all duration-700"
-                            style={{ width: `${proj.progress}%` }}
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
+              <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+                {filteredProjects.map((project) => (
+                  <React.Fragment key={project.id}>
+                    <ProjectCard project={project} onSelect={() => onSelectProject(project)} />
+                  </React.Fragment>
                 ))}
               </div>
             )}
-          </div>
-        </section>
+          </section>
+        </div>
 
-        {/* Right Sidebar: Quick Tools panel */}
-        <aside className="w-80 border-l border-white/10 bg-[#0e0e0e] p-8 flex flex-col gap-8 hidden xl:flex z-10 select-none">
-          
-          {/* Annotation types list */}
-          <div>
-            <h3 className="text-[10px] font-bold uppercase tracking-[0.25em] text-white/40 mb-6 font-sans">
-              Supported Annotation Types
-            </h3>
-            <ul className="space-y-4">
-              {annotationFeatures.map((feature) => (
-                <li key={feature.id}>
+        <aside className="space-y-6">
+          <section className="rounded-[1.5rem] border border-outline-variant/40 bg-surface-container-lowest p-6">
+            <h2 className="text-label-md font-bold uppercase tracking-[0.2em] text-on-surface-variant">标注能力</h2>
+            <div className="mt-5 space-y-3">
+              {ANNOTATION_FEATURES.map((feature) => {
+                const online = feature.status === 'online';
+                return (
                   <button
+                    key={feature.id}
                     type="button"
                     onClick={() => onOpenAnnotationFeature(feature.id)}
-                    className="group flex w-full items-center gap-4 border-b border-white/5 py-3 text-left transition-all hover:border-white/15 active:scale-[0.99]"
+                    className="flex w-full items-center gap-3 rounded-[0.75rem] border border-outline-variant/40 bg-surface-container-lowest p-3 text-left transition-colors hover:bg-surface-container"
                   >
-                    <span className={`${feature.status === 'online' ? 'text-white/65 group-hover:text-white' : 'text-white/35 group-hover:text-white/70'}`}>
+                    <span className="flex h-9 w-9 items-center justify-center rounded-[0.75rem] bg-surface-container-high text-primary">
                       {feature.icon}
                     </span>
-                    <span className="flex-1 text-[11px] uppercase tracking-[0.18em] font-semibold text-white/70 group-hover:text-white">
-                      {feature.label}
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-label-md font-semibold text-primary">{feature.label}</span>
+                      <span className="mt-0.5 block truncate text-label-sm text-on-surface-variant">{feature.description}</span>
                     </span>
-                    <span className={`text-[8px] uppercase tracking-[0.16em] font-mono ${feature.status === 'online' ? 'text-emerald-300' : 'text-white/30'}`}>
-                      {feature.status === 'online' ? 'Live' : 'Soon'}
+                    <span className={`rounded-full px-2 py-1 text-label-sm font-semibold ${online ? 'bg-primary text-on-primary' : 'bg-surface-container-high text-on-surface-variant'}`}>
+                      {online ? '可用' : '待开发'}
                     </span>
                   </button>
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          {/* Call-to-Action module card */}
-          <div className="mt-auto p-6 bg-[#141414] border border-white/5 text-white rounded-none relative overflow-hidden group">
-            <div className="absolute inset-0 bg-gradient-to-br from-white/[0.03] to-transparent opacity-60" />
-            <div className="relative z-10 flex flex-col h-full">
-              <h4 className="font-serif italic text-lg text-white">Upgrade to Enterprise</h4>
-              <p className="text-white/50 text-xs mt-2.5 leading-relaxed">
-                Unlock advanced layout model validation, active learning cycles, and secure SSO team mappings.
-              </p>
-              <button 
-                onClick={() => setIsEnterpriseModalOpen(true)}
-                className="mt-5 bg-white text-black hover:bg-white/90 w-full py-2.5 rounded-none font-bold text-[10px] tracking-[0.2em] uppercase transition-all duration-150"
-              >
-                Learn More
-              </button>
+                );
+              })}
             </div>
-          </div>
+          </section>
+
+          <section className="rounded-[1.5rem] border border-outline-variant/40 bg-surface-container-lowest p-6">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-[0.75rem] bg-surface-container-high text-primary">
+                <Database className="h-5 w-5" />
+              </div>
+              <div>
+                <h2 className="text-label-md font-bold text-primary">企业工作区</h2>
+                <p className="text-label-sm text-on-surface-variant">Data Science Lab</p>
+              </div>
+            </div>
+            <p className="mt-4 text-label-md leading-6 text-on-surface-variant">
+              统一管理数据集处理、提示词、人工校验和格式转换，减少页面之间的操作跳转。
+            </p>
+            <button
+              type="button"
+              onClick={() => setIsEnterpriseModalOpen(true)}
+              className="mt-5 flex w-full items-center justify-center gap-2 rounded-[0.75rem] border border-outline-variant/50 px-4 py-3 text-label-md font-semibold text-primary hover:bg-surface-container"
+            >
+              <ArrowUpRight className="h-4 w-4" />
+              查看说明
+            </button>
+          </section>
         </aside>
       </div>
 
-      {/* Footer bar containing fast navigators */}
-      <footer className="absolute bottom-0 left-0 w-full flex flex-col md:flex-row justify-between items-center px-10 py-6 border-t border-white/10 bg-[#0c0c0c]/95 backdrop-blur-md z-10 select-none">
-        <div className="flex gap-8 text-[9px] uppercase tracking-[0.3em] text-white/40 font-mono">
-          <a className="hover:text-white transition-colors flex items-center gap-2" href="#annotations">
-            <span className="w-1.5 h-1.5 rounded-full bg-orange-700 animate-pulse" />
-            <span>Vol. 012 / Issue 04</span>
-          </a>
-          <span className="opacity-30">© Studio Archaic MMXXVI</span>
-        </div>
-        <div className="flex gap-4 mt-3 md:mt-0">
-          <button 
-            onClick={() => {
-              if (projects.length > 0) {
-                onSelectProject(projects[0]);
-              }
-            }}
-            className="px-5 py-2 border border-white/10 bg-[#141414] text-white/80 font-bold text-[10px] uppercase tracking-[0.2em] hover:bg-[#1a1a1a] hover:text-white rounded-none transition-colors duration-150"
-          >
-            Manage Active Workspace
-          </button>
-          <button 
-            onClick={() => setIsNewProjectModalOpen(true)}
-            className="px-5 py-2.5 bg-white text-black font-semibold text-[10px] uppercase tracking-[0.2em] hover:bg-white/95 transition-all duration-150 flex items-center gap-2 rounded-none"
-          >
-            <Plus className="w-4 h-4" /> Start New Annotation Project
-          </button>
-        </div>
-      </footer>
-
-      {/* dialog / modals */}
       <AnimatePresence>
         {isNewProjectModalOpen && (
-          <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ scale: 0.98, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.98, opacity: 0 }}
-              className="bg-[#0e0e0e] rounded-none p-8 max-w-lg w-full border border-white/10 shadow-2xl relative text-white"
-            >
-              <button 
-                onClick={() => setIsNewProjectModalOpen(false)}
-                className="absolute top-4 right-4 p-1 rounded-none hover:bg-white/5 text-white/40 hover:text-white"
-              >
-                <X className="w-5 h-5" />
-              </button>
-
-              <div className="flex items-center gap-3 mb-6">
-                <Database className="w-6 h-6 text-white/80" />
-                <h3 className="font-serif italic text-xl text-white">New Annotation Dataset</h3>
+          <Modal title="新建标注项目" onClose={() => setIsNewProjectModalOpen(false)}>
+            <form onSubmit={handleCreateSubmit} className="space-y-5">
+              <Field label="项目名称" value={newProjName} onChange={setNewProjName} required placeholder="例如：合同版面解析" />
+              <Textarea label="项目描述" value={newProjDesc} onChange={setNewProjDesc} placeholder="描述数据集来源和标注目标" />
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <SelectField
+                  label="模型类型"
+                  value={newProjType}
+                  onChange={(value) => setNewProjType(value as typeof newProjType)}
+                  options={[
+                    ['CV', 'Computer Vision'],
+                    ['Multimodal', 'Multimodal'],
+                    ['Keypoints', 'Keypoints'],
+                    ['NLP', 'NLP'],
+                  ]}
+                />
+                <SelectField
+                  label="分类标签"
+                  value={newProjCategory}
+                  onChange={setNewProjCategory}
+                  options={[
+                    ['Layout Analysis', 'Layout Analysis'],
+                    ['Instance Segmentation', 'Instance Segmentation'],
+                    ['Image-Text Align', 'Image-Text Align'],
+                    ['Keypoints Detection', 'Keypoints Detection'],
+                  ]}
+                />
               </div>
-
-              <form onSubmit={handleCreateSubmit} className="space-y-5">
-                <div>
-                  <label className="block text-[10px] font-semibold text-white/50 mb-1.5 uppercase tracking-[0.15em]">Project Name</label>
-                  <input 
-                    type="text" 
-                    required
-                    placeholder="e.g. Invoices Layout Parsing"
-                    value={newProjName}
-                    onChange={(e) => setNewProjName(e.target.value)}
-                    className="w-full px-3.5 py-2.5 bg-white/[0.03] border border-white/10 rounded-none text-xs text-white focus:outline-none focus:border-white/30 transition-all uppercase tracking-wider placeholder-white/20"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-semibold text-white/50 mb-1.5 uppercase tracking-[0.15em]">Short Description</label>
-                  <textarea 
-                    placeholder="Describe datasets and annotation rules..."
-                    value={newProjDesc}
-                    onChange={(e) => setNewProjDesc(e.target.value)}
-                    rows={3}
-                    className="w-full px-3.5 py-2.5 bg-white/[0.03] border border-white/10 rounded-none text-xs text-white focus:outline-none focus:border-white/30 transition-all resize-none placeholder-white/20"
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-[10px] font-semibold text-white/50 mb-1.5 uppercase tracking-[0.15em]">Model Type</label>
-                    <select 
-                      value={newProjType}
-                      onChange={(e) => setNewProjType(e.target.value as any)}
-                      className="w-full px-3.5 py-2.5 bg-[#0e0e0e] border border-white/10 rounded-none text-xs text-white focus:outline-none focus:border-white/30"
-                    >
-                      <option value="CV">Computer Vision (CV)</option>
-                      <option value="Multimodal">Multimodal (VLM)</option>
-                      <option value="Keypoints">Keypoints Tracking</option>
-                      <option value="NLP">Text NLP / Parsing</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-[10px] font-semibold text-white/50 mb-1.5 uppercase tracking-[0.15em]">Classification Tag</label>
-                    <select 
-                      value={newProjCategory}
-                      onChange={(e) => setNewProjCategory(e.target.value)}
-                      className="w-full px-3.5 py-2.5 bg-[#0e0e0e] border border-white/10 rounded-none text-xs text-white focus:outline-none focus:border-white/30"
-                    >
-                      <option value="Layout Analysis">Layout Analysis</option>
-                      <option value="Instance Segmentation">Instance Segmentation</option>
-                      <option value="Image-Text Align">Image-Text Alignment</option>
-                      <option value="Keypoints Detection">Keypoints Tracking</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div className="pt-4 flex justify-end gap-3 border-t border-white/5">
-                  <button 
-                    type="button"
-                    onClick={() => setIsNewProjectModalOpen(false)}
-                    className="px-4 py-2 text-[10px] font-bold border border-white/10 hover:bg-white/5 rounded-none text-white/80 uppercase tracking-[0.15em]"
-                  >
-                    Cancel
-                  </button>
-                  <button 
-                    type="submit"
-                    className="px-5 py-2 bg-white text-black hover:bg-white/90 text-[10px] font-bold rounded-none uppercase tracking-[0.15em]"
-                  >
-                    Create Project
-                  </button>
-                </div>
-              </form>
-            </motion.div>
-          </div>
+              <div className="flex justify-end gap-3 border-t border-outline-variant/40 pt-4">
+                <button type="button" onClick={() => setIsNewProjectModalOpen(false)} className="rounded-[0.75rem] border border-outline-variant/50 px-4 py-2 text-label-md font-semibold text-on-surface-variant hover:bg-surface-container">取消</button>
+                <button type="submit" className="rounded-[0.75rem] bg-primary px-5 py-2 text-label-md font-semibold text-on-primary hover:bg-primary/90">创建</button>
+              </div>
+            </form>
+          </Modal>
         )}
 
         {isCollaboratorsOpen && (
-          <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ scale: 0.98, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.98, opacity: 0 }}
-              className="bg-[#0e0e0e] rounded-none p-8 max-w-md w-full border border-white/10 shadow-2xl relative text-white"
-            >
-              <button 
-                onClick={() => setIsCollaboratorsOpen(false)}
-                className="absolute top-4 right-4 p-1 rounded-none hover:bg-white/5 text-white/40"
-              >
-                <X className="w-5 h-5" />
-              </button>
-
-              <div className="flex items-center gap-3 mb-6">
-                <Users className="w-6 h-6 text-white/85" />
-                <h3 className="font-serif italic text-xl text-white">Active Team Collaborators</h3>
-              </div>
-
-              <div className="space-y-4 max-h-96 overflow-y-auto pr-2 custom-scrollbar">
-                {collaborators.map(c => (
-                  <div key={c.id} className="flex items-center justify-between p-3.5 bg-white/[0.02] rounded-none border border-white/5">
-                    <div className="flex items-center gap-3">
-                      <img 
-                        src={c.avatar} 
-                        alt="Avatar" 
-                        referrerPolicy="no-referrer"
-                        className="w-10 h-10 rounded-none object-cover border border-white/10"
-                      />
-                      <div>
-                        <h4 className="text-xs font-bold text-white uppercase tracking-wider">{c.name}</h4>
-                        <p className="text-[11px] text-white/40 mt-0.5">{c.role}</p>
-                      </div>
+          <Modal title="团队成员" onClose={() => setIsCollaboratorsOpen(false)}>
+            <div className="max-h-96 space-y-3 overflow-y-auto pr-1">
+              {collaborators.map((collaborator) => (
+                <div key={collaborator.id} className="flex items-center justify-between rounded-[0.75rem] border border-outline-variant/40 bg-surface-container p-3">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-label-md font-bold text-on-primary">
+                      {initials(collaborator.name)}
                     </div>
-                    <span className="flex items-center gap-1.5 text-[9px] uppercase tracking-wider bg-white/5 text-white/85 font-mono px-2 py-0.5 rounded-none border border-white/10">
-                      <span className="w-1 h-1 bg-amber-500 rounded-full animate-pulse" /> Active
-                    </span>
+                    <div>
+                      <h3 className="text-label-md font-semibold text-primary">{collaborator.name}</h3>
+                      <p className="text-label-sm text-on-surface-variant">{collaborator.role}</p>
+                    </div>
                   </div>
-                ))}
-              </div>
-
-              <div className="mt-6 pt-4 border-t border-white/5 flex justify-end">
-                <button 
-                  onClick={() => setIsCollaboratorsOpen(false)}
-                  className="px-5 py-2 bg-white text-black hover:bg-white/95 rounded-none text-[10px] font-bold uppercase tracking-[0.15em]"
-                >
-                  Close Panel
-                </button>
-              </div>
-            </motion.div>
-          </div>
+                  <span className="rounded-full bg-primary/10 px-2 py-1 text-label-sm font-semibold text-primary">Active</span>
+                </div>
+              ))}
+            </div>
+          </Modal>
         )}
 
         {isEnterpriseModalOpen && (
-          <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ scale: 0.98, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.98, opacity: 0 }}
-              className="bg-[#0e0e0e] rounded-none p-8 max-w-md w-full border border-white/10 shadow-2xl relative text-white"
-            >
-              <button 
-                onClick={() => setIsEnterpriseModalOpen(false)}
-                className="absolute top-4 right-4 p-1 rounded-none hover:bg-white/5 text-white/40"
-              >
-                <X className="w-5 h-5" />
-              </button>
-
-              <div className="flex items-center gap-3 mb-4">
-                <ArrowUpRight className="w-6 h-6 text-white/80" />
-                <h3 className="font-serif italic text-xl text-white">Enterprise Platform Info</h3>
-              </div>
-
-              <div className="space-y-4 text-xs text-white/60 font-sans leading-relaxed">
-                <p>
-                  MarkHub Enterprise provides full infrastructure scalability to orchestrate model labeling feedback loops for massive AI teams.
-                </p>
-                <div className="space-y-2.5 bg-white/[0.02] p-4 border border-white/5">
-                  <div className="flex items-center gap-2 text-white/80 font-semibold">
-                    <CheckCircle className="w-4 h-4 text-white/40" />
-                    <span className="text-[11px] uppercase tracking-wider font-mono">Real-time Gemini Model Grounding</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-white/80 font-semibold">
-                    <CheckCircle className="w-4 h-4 text-white/40" />
-                    <span className="text-[11px] uppercase tracking-wider font-mono">Single Sign-On (Active Directory / SSO)</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-white/80 font-semibold">
-                    <CheckCircle className="w-4 h-4 text-white/40" />
-                    <span className="text-[11px] uppercase tracking-wider font-mono">High Quality SLA validation checks</span>
-                  </div>
+          <Modal title="企业工作区说明" onClose={() => setIsEnterpriseModalOpen(false)}>
+            <div className="space-y-4 text-label-md leading-6 text-on-surface-variant">
+              {[
+                '统一的页面外壳用于承载项目、数据集、提示词、设置和工作台入口。',
+                '数据集处理结果会同步到项目列表，方便直接进入查看或标注。',
+                '后续可以继续接入权限、任务分派和质量统计。'
+              ].map((item) => (
+                <div key={item} className="flex gap-2">
+                  <CheckCircle className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                  <span>{item}</span>
                 </div>
-                <p className="text-[11px] text-white/30 italic">
-                  To proceed with upgrade license options details, consult with your DevOps or Billing accounts.
-                </p>
-              </div>
-
-              <div className="mt-6 pt-4 border-t border-white/5 flex justify-end">
-                <button 
-                  onClick={() => setIsEnterpriseModalOpen(false)}
-                  className="px-5 py-2 bg-white text-black hover:bg-white/95 rounded-none text-[10px] font-bold uppercase tracking-[0.15em]"
-                >
-                  Understood
-                </button>
-              </div>
-            </motion.div>
-          </div>
+              ))}
+            </div>
+          </Modal>
         )}
       </AnimatePresence>
+    </section>
+  );
+}
+
+function MetricCard({ label, value, note }: { label: string; value: string; note: string }) {
+  return (
+    <div className="rounded-[1.5rem] border border-outline-variant/40 bg-surface/50 p-6 backdrop-blur-sm">
+      <span className="text-label-md font-medium uppercase tracking-wider text-on-surface-variant">{label}</span>
+      <div className="mt-3 text-display-lg font-bold leading-none text-primary">{value}</div>
+      <p className="mt-3 text-label-sm font-semibold text-on-surface-variant">{note}</p>
     </div>
   );
+}
+
+function ProjectCard({ project, onSelect }: { project: Project; onSelect: () => void }) {
+  return (
+    <article
+      role="button"
+      tabIndex={0}
+      onClick={onSelect}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onSelect();
+        }
+      }}
+      className="group flex h-full cursor-pointer gap-5 rounded-[1.5rem] border border-outline-variant/40 bg-surface-container-lowest p-6 transition-all hover:shadow-[0_8px_30px_rgba(0,0,0,0.04)] focus:outline-none focus:ring-2 focus:ring-primary/30"
+    >
+      <div className="flex h-24 w-24 shrink-0 items-center justify-center rounded-[0.75rem] bg-surface-container-high text-primary">
+        <FileText className="h-9 w-9" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <span className="rounded bg-surface-container px-2 py-0.5 text-label-sm font-semibold text-primary">{project.type}</span>
+          <span className="text-label-sm font-semibold text-on-surface-variant">{project.category}</span>
+        </div>
+        <h3 className="truncate text-headline-sm font-semibold text-primary">{project.name}</h3>
+        <p className="mt-2 line-clamp-2 text-label-md leading-6 text-on-surface-variant">{project.description}</p>
+        <div className="mt-5">
+          <div className="mb-2 flex justify-between text-label-sm font-semibold text-on-surface-variant">
+            <span>完成进度</span>
+            <span>{project.progress}%</span>
+          </div>
+          <div className="h-1.5 overflow-hidden rounded-full bg-surface-container-high">
+            <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${project.progress}%` }} />
+          </div>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function EmptyState({ title, description, actionLabel, onAction }: { title: string; description: string; actionLabel: string; onAction: () => void }) {
+  return (
+    <div className="rounded-[1.5rem] border border-outline-variant/40 bg-surface-container-lowest p-[40px] text-center">
+      <Database className="mx-auto mb-4 h-10 w-10 text-on-surface-variant" />
+      <h3 className="text-headline-sm font-semibold text-primary">{title}</h3>
+      <p className="mx-auto mt-2 max-w-md text-body-md text-on-surface-variant">{description}</p>
+      <button onClick={onAction} className="mt-5 rounded-[0.75rem] bg-primary px-5 py-3 text-label-md font-semibold text-on-primary hover:bg-primary/90">
+        {actionLabel}
+      </button>
+    </div>
+  );
+}
+
+function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+  return (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/30 p-4 backdrop-blur-sm">
+      <motion.div
+        initial={{ opacity: 0, scale: 0.98, y: 10 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.98, y: 10 }}
+        transition={{ duration: 0.18, ease: 'easeOut' }}
+        className="w-full max-w-lg rounded-[1.5rem] border border-outline-variant/60 bg-surface-container-lowest p-6 shadow-[0_24px_80px_rgba(0,0,0,0.12)]"
+      >
+        <div className="mb-6 flex items-center justify-between gap-4">
+          <h2 className="text-headline-sm font-semibold text-primary">{title}</h2>
+          <button onClick={onClose} className="rounded-full p-2 text-on-surface-variant hover:bg-surface-container" aria-label="关闭">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        {children}
+      </motion.div>
+    </div>
+  );
+}
+
+function Field({ label, value, onChange, required, placeholder }: { label: string; value: string; onChange: (value: string) => void; required?: boolean; placeholder?: string }) {
+  return (
+    <label className="block text-label-sm font-semibold text-on-surface-variant">
+      {label}
+      <input
+        value={value}
+        required={required}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        className="mt-1 w-full rounded-[0.75rem] border border-outline-variant/50 bg-surface-container px-3 py-2.5 text-label-md text-on-surface outline-none placeholder:text-on-surface-variant focus:border-primary"
+      />
+    </label>
+  );
+}
+
+function Textarea({ label, value, onChange, placeholder }: { label: string; value: string; onChange: (value: string) => void; placeholder?: string }) {
+  return (
+    <label className="block text-label-sm font-semibold text-on-surface-variant">
+      {label}
+      <textarea
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        rows={3}
+        className="mt-1 w-full resize-none rounded-[0.75rem] border border-outline-variant/50 bg-surface-container px-3 py-2.5 text-label-md text-on-surface outline-none placeholder:text-on-surface-variant focus:border-primary"
+      />
+    </label>
+  );
+}
+
+function SelectField({ label, value, onChange, options }: { label: string; value: string; onChange: (value: string) => void; options: Array<[string, string]> }) {
+  return (
+    <label className="block text-label-sm font-semibold text-on-surface-variant">
+      {label}
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="mt-1 w-full rounded-[0.75rem] border border-outline-variant/50 bg-surface-container px-3 py-2.5 text-label-md text-on-surface outline-none focus:border-primary"
+      >
+        {options.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+      </select>
+    </label>
+  );
+}
+
+function initials(name: string) {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join('');
 }

@@ -527,23 +527,23 @@ export default function Workspace({
   const canvasHeight = currentPage ? Math.round(canvasWidth * (currentPage.height / Math.max(currentPage.width, 1))) : 880;
 
   return (
-    <div id="layout-workspace-container" className="flex flex-1 flex-col md:flex-row overflow-hidden relative font-sans select-none bg-[#0c0c0c] text-[#e5e5e5]">
-      <header className="absolute top-0 left-0 w-full z-40 flex justify-between items-center px-10 h-16 bg-[#0c0c0c]/90 backdrop-blur-md border-b border-white/10">
+    <div id="layout-workspace-container" className="flex flex-1 flex-col overflow-hidden relative font-sans select-none bg-surface-container-low text-on-surface">
+      <header className="absolute top-0 left-0 w-full z-40 flex justify-between items-center px-6 md:px-10 h-16 bg-surface/90 backdrop-blur-xl border-b border-outline-variant/40">
         <div className="flex items-center gap-4">
           <button
             onClick={onGoBack}
-            className="p-2 text-white/60 hover:text-white hover:bg-white/5 rounded-none border border-transparent hover:border-white/10 transition-colors flex items-center justify-center cursor-pointer"
+            className="flex items-center justify-center rounded-full border border-transparent p-2 text-on-surface-variant transition-colors hover:border-outline-variant/50 hover:bg-surface-container hover:text-primary"
           >
             <ArrowLeft className="w-5 h-5" />
           </button>
           <div className="flex flex-col">
-            <h1 className="font-serif italic text-base text-white flex items-center gap-2 tracking-tight">
+            <h1 className="flex items-center gap-2 text-label-md font-semibold tracking-tight text-primary">
               {project.name}
-              <span className="px-2 py-0.5 border border-white/10 rounded-none text-[9px] font-mono tracking-wider text-white/70 bg-white/5">
+              <span className="rounded-full border border-outline-variant/50 bg-surface-container px-2 py-0.5 text-[9px] font-mono tracking-wider text-on-surface-variant">
                 PDF
               </span>
             </h1>
-            <span className="text-[10px] font-mono uppercase tracking-wider text-white/40 flex items-center gap-1 mt-0.5">
+            <span className="mt-0.5 flex items-center gap-1 text-[10px] font-mono uppercase tracking-wider text-on-surface-variant">
               <span className={`w-1.5 h-1.5 rounded-full ${isAnalyzing ? 'bg-amber-400 animate-pulse' : 'bg-emerald-500'}`} />
               {analysisJob ? `${analysisJob.status} · ${completedPages}/${displayedPageCount} pages` : 'Backend-ready annotation workspace'}
             </span>
@@ -551,8 +551,8 @@ export default function Workspace({
         </div>
 
         {apiSource === 'backend' && (
-          <div className="hidden lg:flex items-center gap-2 text-[10px] uppercase tracking-wider px-3.5 py-1 bg-white/5 border border-white/10 rounded-none text-white/80 font-mono">
-            <CloudLightning className="w-3.5 h-3.5 text-white/70" />
+          <div className="hidden items-center gap-2 rounded-full border border-outline-variant/50 bg-surface-container px-3.5 py-1 text-[10px] font-mono uppercase tracking-wider text-on-surface-variant lg:flex">
+            <CloudLightning className="w-3.5 h-3.5 text-primary" />
             <span>Python backend · {analysisJob?.config?.model || selectedModel || 'model pending'} · {activeTemplateName}</span>
           </div>
         )}
@@ -560,39 +560,39 @@ export default function Workspace({
         <div className="flex items-center gap-3">
           <button
             onClick={handleExportJson}
-            className="p-2 text-white/60 hover:text-white hover:bg-white/5 rounded-none border border-transparent hover:border-white/10 transition-colors flex items-center justify-center cursor-pointer"
+            className="flex items-center justify-center rounded-full border border-transparent p-2 text-on-surface-variant transition-colors hover:border-outline-variant/50 hover:bg-surface-container hover:text-primary"
             title="Download JSON Representation"
           >
             <Download className="w-5 h-5" />
           </button>
-          <div className="w-px h-6 bg-white/10 mx-1" />
+          <div className="w-px h-6 bg-outline-variant/60 mx-1" />
           <button
             onClick={loadBackendConfig}
-            className="px-4 py-2 text-[10px] uppercase tracking-[0.2em] font-bold border border-white/10 rounded-none bg-transparent text-white/80 hover:bg-white/10 hover:text-white transition-colors"
+            className="rounded-[0.75rem] border border-outline-variant/50 px-4 py-2 text-[10px] font-bold uppercase tracking-[0.2em] text-primary transition-colors hover:bg-surface-container"
           >
             Sync Config
           </button>
           <button
             onClick={handleExportJson}
-            className="px-4 py-2 text-[10px] uppercase tracking-[0.2em] font-bold rounded-none bg-white text-black hover:bg-white/90 transition-all flex items-center gap-2"
+            className="flex items-center gap-2 rounded-[0.75rem] bg-primary px-4 py-2 text-[10px] font-bold uppercase tracking-[0.2em] text-on-primary transition-all hover:bg-primary/90"
           >
             <span>Export JSON</span>
           </button>
         </div>
       </header>
 
-      <div className="flex-1 flex pt-16 h-full overflow-hidden w-full bg-[#0c0c0c]">
-        <aside className="w-[340px] h-full flex flex-col border-r border-white/10 bg-[#0c0c0c] z-20 flex-shrink-0 text-[#e5e5e5]">
+      <div className="flex-1 flex pt-16 h-full overflow-hidden w-full bg-surface-container-low">
+        <aside className="w-[340px] h-full flex flex-col border-r border-outline-variant/40 bg-surface-container-lowest z-20 flex-shrink-0 text-on-surface">
           <div className="p-6 flex flex-col h-full overflow-y-auto custom-scrollbar">
-            <h2 className="font-serif italic text-xl text-white mb-6">Analysis Setup</h2>
+            <h2 className="mb-6 text-headline-sm font-semibold text-primary">Analysis Setup</h2>
 
             <div
               onClick={triggerReplaceDocument}
-              className="mb-5 border border-dashed border-white/20 hover:border-white/40 bg-white/[0.02] hover:bg-white/[0.05] rounded-none p-5 flex flex-col items-center justify-center text-center transition-all cursor-pointer group select-none"
+              className="mb-5 flex cursor-pointer select-none flex-col items-center justify-center rounded-[0.75rem] border border-dashed border-outline-variant/60 bg-surface-container p-5 text-center transition-all hover:border-primary/50 hover:bg-surface-container-high"
             >
-              <Upload className="w-6 h-6 text-white/40 group-hover:text-white mb-2 transition-colors" />
-              <p className="text-[10px] uppercase tracking-wider font-semibold text-white/60 group-hover:text-white">Replace PDF Document</p>
-              <p className="text-[10px] text-white/35 mt-1 max-w-[230px] truncate">{selectedFile ? selectedFile.name : 'Backend accepts .pdf files'}</p>
+              <Upload className="mb-2 h-6 w-6 text-on-surface-variant transition-colors group-hover:text-primary" />
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-on-surface-variant group-hover:text-primary">Replace PDF Document</p>
+              <p className="mt-1 max-w-[230px] truncate text-[10px] text-on-surface-variant">{selectedFile ? selectedFile.name : 'Backend accepts .pdf files'}</p>
               <input
                 ref={fileInputRef}
                 type="file"
@@ -603,34 +603,34 @@ export default function Workspace({
             </div>
 
             {errorMessage && (
-              <div className="mb-5 p-3 border border-rose-400/20 bg-rose-500/10 text-rose-100 text-[11px] leading-relaxed font-mono">
+              <div className="mb-5 rounded-[0.75rem] border border-error/20 bg-error/10 p-3 text-[11px] font-mono leading-relaxed text-error">
                 {errorMessage}
               </div>
             )}
 
             <div className="flex flex-col gap-5 flex-1">
               <div className="flex flex-col gap-2">
-                <label className="text-[10px] uppercase tracking-wider font-bold text-white/60 flex items-center justify-between">
+                <label className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">
                   <span>Model Endpoint</span>
-                  <Info className="w-3.5 h-3.5 text-white/40 hover:text-white cursor-help" title="These fields map directly to backend LLM_BASE_URL, LLM_MODEL, API key, and timeout." />
+                  <Info className="h-3.5 w-3.5 cursor-help text-on-surface-variant hover:text-primary" title="These fields map directly to backend LLM_BASE_URL, LLM_MODEL, API key, and timeout." />
                 </label>
-                <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="Base URL" className="w-full bg-[#0e0e0e] border border-white/10 rounded-none px-3 py-2.5 text-xs text-white focus:outline-none focus:border-white/30 font-medium" />
-                <input value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} placeholder="Model name" className="w-full bg-[#0e0e0e] border border-white/10 rounded-none px-3 py-2.5 text-xs text-white focus:outline-none focus:border-white/30 font-medium" />
+                <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="Base URL" className="w-full rounded-[0.75rem] border border-outline-variant/50 bg-surface-container px-3 py-2.5 text-xs font-medium text-on-surface outline-none focus:border-primary" />
+                <input value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} placeholder="Model name" className="w-full rounded-[0.75rem] border border-outline-variant/50 bg-surface-container px-3 py-2.5 text-xs font-medium text-on-surface outline-none focus:border-primary" />
                 <div className="grid grid-cols-2 gap-2">
-                  <input value={apiKey} onChange={(e) => setApiKey(e.target.value)} type="password" placeholder="API Key optional" className="w-full bg-[#0e0e0e] border border-white/10 rounded-none px-3 py-2.5 text-xs text-white focus:outline-none focus:border-white/30 font-medium" />
-                  <input value={timeout} onChange={(e) => setTimeoutValue(e.target.value)} type="number" min="10" max="900" placeholder="Timeout" className="w-full bg-[#0e0e0e] border border-white/10 rounded-none px-3 py-2.5 text-xs text-white focus:outline-none focus:border-white/30 font-medium" />
+                  <input value={apiKey} onChange={(e) => setApiKey(e.target.value)} type="password" placeholder="API Key optional" className="w-full rounded-[0.75rem] border border-outline-variant/50 bg-surface-container px-3 py-2.5 text-xs font-medium text-on-surface outline-none focus:border-primary" />
+                  <input value={timeout} onChange={(e) => setTimeoutValue(e.target.value)} type="number" min="10" max="900" placeholder="Timeout" className="w-full rounded-[0.75rem] border border-outline-variant/50 bg-surface-container px-3 py-2.5 text-xs font-medium text-on-surface outline-none focus:border-primary" />
                 </div>
               </div>
 
               <div className="flex flex-col gap-2">
-                <label className="text-[10px] uppercase tracking-wider font-bold text-white/60 flex items-center gap-2">
+                <label className="text-[10px] uppercase tracking-wider font-bold text-on-surface-variant flex items-center gap-2">
                   <Settings2 className="w-3.5 h-3.5" /> Render Controls
                 </label>
                 <div className="grid grid-cols-2 gap-2">
-                  <input value={renderDpi} onChange={(e) => setRenderDpi(e.target.value)} type="number" min="72" max="300" placeholder="Render DPI" className="w-full bg-[#0e0e0e] border border-white/10 rounded-none px-3 py-2.5 text-xs text-white focus:outline-none focus:border-white/30 font-medium" />
-                  <input value={maxPages} onChange={(e) => setMaxPages(e.target.value)} type="number" min="1" max="200" placeholder="Max pages" className="w-full bg-[#0e0e0e] border border-white/10 rounded-none px-3 py-2.5 text-xs text-white focus:outline-none focus:border-white/30 font-medium" />
+                  <input value={renderDpi} onChange={(e) => setRenderDpi(e.target.value)} type="number" min="72" max="300" placeholder="Render DPI" className="w-full bg-surface-container-lowest border border-outline-variant/40 rounded-[0.75rem] px-3 py-2.5 text-xs text-primary focus:outline-none focus:border-outline-variant/70 font-medium" />
+                  <input value={maxPages} onChange={(e) => setMaxPages(e.target.value)} type="number" min="1" max="200" placeholder="Max pages" className="w-full bg-surface-container-lowest border border-outline-variant/40 rounded-[0.75rem] px-3 py-2.5 text-xs text-primary focus:outline-none focus:border-outline-variant/70 font-medium" />
                 </div>
-                <select value={qwenPreset} onChange={(e) => setQwenPreset(e.target.value)} className="w-full bg-[#0e0e0e] border border-white/10 rounded-none px-3 py-2.5 text-xs text-white focus:outline-none focus:border-white/30 font-medium">
+                <select value={qwenPreset} onChange={(e) => setQwenPreset(e.target.value)} className="w-full bg-surface-container-lowest border border-outline-variant/40 rounded-[0.75rem] px-3 py-2.5 text-xs text-primary focus:outline-none focus:border-outline-variant/70 font-medium">
                   <option value="speed">Speed · 1216 × 1728</option>
                   <option value="default">Default · 1536 × 2176</option>
                   <option value="high">High · 2048 × 2912</option>
@@ -638,15 +638,15 @@ export default function Workspace({
                 </select>
                 {qwenPreset === 'custom' && (
                   <div className="grid grid-cols-2 gap-2">
-                    <input value={qwenWidth} onChange={(e) => setQwenWidth(e.target.value)} type="number" min="1024" max="4096" step="32" placeholder="Width" className="w-full bg-[#0e0e0e] border border-white/10 rounded-none px-3 py-2.5 text-xs text-white focus:outline-none focus:border-white/30 font-medium" />
-                    <input value={qwenHeight} onChange={(e) => setQwenHeight(e.target.value)} type="number" min="1024" max="6144" step="32" placeholder="Height" className="w-full bg-[#0e0e0e] border border-white/10 rounded-none px-3 py-2.5 text-xs text-white focus:outline-none focus:border-white/30 font-medium" />
+                    <input value={qwenWidth} onChange={(e) => setQwenWidth(e.target.value)} type="number" min="1024" max="4096" step="32" placeholder="Width" className="w-full bg-surface-container-lowest border border-outline-variant/40 rounded-[0.75rem] px-3 py-2.5 text-xs text-primary focus:outline-none focus:border-outline-variant/70 font-medium" />
+                    <input value={qwenHeight} onChange={(e) => setQwenHeight(e.target.value)} type="number" min="1024" max="6144" step="32" placeholder="Height" className="w-full bg-surface-container-lowest border border-outline-variant/40 rounded-[0.75rem] px-3 py-2.5 text-xs text-primary focus:outline-none focus:border-outline-variant/70 font-medium" />
                   </div>
                 )}
               </div>
 
               <div className="flex flex-col gap-2">
-                <label className="text-[10px] uppercase tracking-wider font-bold text-white/60">Prompt Template</label>
-                <select value={promptTemplateId} onChange={(e) => setPromptTemplateId(e.target.value)} className="w-full bg-[#0e0e0e] border border-white/10 rounded-none px-3 py-2.5 text-xs text-white focus:outline-none focus:border-white/30 font-medium">
+                <label className="text-[10px] uppercase tracking-wider font-bold text-on-surface-variant">Prompt Template</label>
+                <select value={promptTemplateId} onChange={(e) => setPromptTemplateId(e.target.value)} className="w-full bg-surface-container-lowest border border-outline-variant/40 rounded-[0.75rem] px-3 py-2.5 text-xs text-primary focus:outline-none focus:border-outline-variant/70 font-medium">
                   {promptTemplates.map((template) => (
                     <option key={template.id} value={template.id}>{template.name}</option>
                   ))}
@@ -654,65 +654,65 @@ export default function Workspace({
               </div>
 
               <div className="flex flex-col gap-3">
-                <label className="text-[10px] uppercase tracking-wider font-bold text-white/60">Backend Block Types</label>
+                <label className="text-[10px] uppercase tracking-wider font-bold text-on-surface-variant">Backend Block Types</label>
                 <div className="grid grid-cols-1 gap-1.5">
                   {BLOCK_TYPES.map((type) => {
                     const colorSchema = getColorSchema(type);
                     return (
-                      <label key={type} className="flex items-center gap-3 p-2 rounded-none hover:bg-white/[0.03] text-white/70 hover:text-white transition-colors cursor-pointer group select-none text-xs font-medium">
+                      <label key={type} className="flex items-center gap-3 p-2 rounded-[0.75rem] hover:bg-surface-container text-on-surface-variant hover:text-primary transition-colors cursor-pointer group select-none text-xs font-medium">
                         <input
                           type="checkbox"
                           checked={targetElements[type]}
                           onChange={(e) => setTargetElements({ ...targetElements, [type]: e.target.checked })}
-                          className="w-3.5 h-3.5 text-white border-white/20 bg-[#0e0e0e] rounded-none focus:ring-0 accent-white cursor-pointer"
+                          className="w-3.5 h-3.5 text-primary border-outline-variant/60 bg-surface-container-lowest rounded-[0.75rem] focus:ring-0 accent-white cursor-pointer"
                         />
-                        <span className="flex-1 text-white/60 group-hover:text-white font-medium">{BLOCK_TYPE_LABELS[type]}</span>
-                        <div className="w-2.5 h-2.5 rounded-none" style={{ backgroundColor: colorSchema.border }} />
+                        <span className="flex-1 text-on-surface-variant group-hover:text-primary font-medium">{BLOCK_TYPE_LABELS[type]}</span>
+                        <div className="w-2.5 h-2.5 rounded-[0.75rem]" style={{ backgroundColor: colorSchema.border }} />
                       </label>
                     );
                   })}
                 </div>
               </div>
 
-              <div className="mt-2 p-4 border border-white/10 rounded-none bg-white/[0.02] opacity-90">
+              <div className="mt-2 p-4 border border-outline-variant/40 rounded-[0.75rem] bg-surface-container opacity-90">
                 <div className="flex items-center justify-between mb-2">
-                  <h3 className="text-xs font-bold text-white uppercase tracking-wide flex items-center gap-2"><Database className="w-3.5 h-3.5" /> History</h3>
-                  <button onClick={loadAnalyzedJobs} className="text-white/45 hover:text-white"><RefreshCw className="w-3.5 h-3.5" /></button>
+                  <h3 className="text-xs font-bold text-primary uppercase tracking-wide flex items-center gap-2"><Database className="w-3.5 h-3.5" /> History</h3>
+                  <button onClick={loadAnalyzedJobs} className="text-on-surface-variant hover:text-primary"><RefreshCw className="w-3.5 h-3.5" /></button>
                 </div>
                 <div className="max-h-36 overflow-y-auto custom-scrollbar flex flex-col gap-2 pr-1">
                   {jobs.length === 0 ? (
-                    <p className="text-[11px] text-white/40 font-serif italic">No backend history yet.</p>
+                    <p className="text-[11px] text-on-surface-variant font-serif italic">No backend history yet.</p>
                   ) : jobs.slice(0, 6).map((job) => (
-                    <button key={job.job_id} onClick={() => loadJob(job.job_id)} className={`text-left p-2 border rounded-none transition-colors ${analysisJob?.job_id === job.job_id ? 'border-white/30 bg-white/[0.05]' : 'border-white/10 bg-white/[0.02] hover:bg-white/[0.04]'}`}>
+                    <button key={job.job_id} onClick={() => loadJob(job.job_id)} className={`text-left p-2 border rounded-[0.75rem] transition-colors ${analysisJob?.job_id === job.job_id ? 'border-outline-variant/70 bg-surface-container-high' : 'border-outline-variant/40 bg-surface-container hover:bg-surface-container-high'}`}>
                       <div className="flex justify-between items-start gap-2">
-                        <span className="text-[11px] text-white/80 font-bold truncate">{job.filename}</span>
-                        <span onClick={(e) => deleteJob(job.job_id, e)} className="text-white/35 hover:text-rose-300"><Trash2 className="w-3.5 h-3.5" /></span>
+                        <span className="text-[11px] text-on-surface font-bold truncate">{job.filename}</span>
+                        <span onClick={(e) => deleteJob(job.job_id, e)} className="text-on-surface-variant hover:text-rose-300"><Trash2 className="w-3.5 h-3.5" /></span>
                       </div>
-                      <p className="text-[9px] text-white/35 font-mono mt-1">{job.status} · {job.completed_pages}/{job.page_count} pages · {job.block_count} blocks</p>
+                      <p className="text-[9px] text-on-surface-variant font-mono mt-1">{job.status} · {job.completed_pages}/{job.page_count} pages · {job.block_count} blocks</p>
                     </button>
                   ))}
                 </div>
               </div>
             </div>
 
-            <div className="mt-8 pt-4 border-t border-white/10">
+            <div className="mt-8 pt-4 border-t border-outline-variant/40">
               <button
                 onClick={handleStartAnalysis}
                 disabled={isAnalyzing}
-                className={`w-full py-3.5 text-[10px] uppercase tracking-[0.25em] font-bold rounded-none flex items-center justify-center gap-2 select-none shadow-sm transition-all duration-150 h-12 ${
+                className={`w-full py-3.5 text-[10px] uppercase tracking-[0.25em] font-bold rounded-[0.75rem] flex items-center justify-center gap-2 select-none shadow-sm transition-all duration-150 h-12 ${
                   isAnalyzing
-                    ? 'bg-white/5 text-white/30 cursor-not-allowed border border-white/5'
-                    : 'bg-white text-black hover:bg-white/90 active:scale-[0.99] cursor-pointer'
+                    ? 'bg-surface-container text-on-surface-variant cursor-not-allowed border border-outline-variant/30'
+                    : 'bg-primary text-on-primary hover:bg-primary/90 active:scale-[0.99] cursor-pointer'
                 }`}
               >
                 {isAnalyzing ? (
                   <div className="flex items-center gap-2">
-                    <span className="w-4 h-4 border-2 border-white/30 border-t-transparent rounded-full animate-spin" />
+                    <span className="w-4 h-4 border-2 border-outline-variant/70 border-t-transparent rounded-full animate-spin" />
                     <span>Analyzing Layout...</span>
                   </div>
                 ) : (
                   <>
-                    <Play className="w-4 h-4 fill-current text-black" />
+                    <Play className="w-4 h-4 fill-current text-on-primary" />
                     <span>Start Analysis</span>
                   </>
                 )}
@@ -721,41 +721,41 @@ export default function Workspace({
           </div>
         </aside>
 
-        <section className="flex-1 relative bg-[#131313] flex items-center justify-center overflow-hidden h-full">
+        <section className="flex-1 relative bg-surface-container flex items-center justify-center overflow-hidden h-full">
           {isAnalyzing && (
             <div className="absolute inset-0 bg-black/60 backdrop-blur-sm z-30 flex flex-col items-center justify-center text-center p-6 select-none">
-              <div className="bg-[#0e0e0e] p-6 rounded-none border border-white/10 shadow-2xl flex flex-col items-center max-w-sm justify-center">
-                <span className="w-10 h-10 border-4 border-white border-t-transparent rounded-full animate-spin mb-4" />
-                <h4 className="font-serif italic text-sm text-white">Backend Layout Engine Processing</h4>
-                <p className="text-xs text-white/50 mt-2 animate-pulse leading-relaxed">{statusMessage}</p>
+              <div className="bg-surface-container-lowest p-6 rounded-[0.75rem] border border-outline-variant/40 shadow-2xl flex flex-col items-center max-w-sm justify-center">
+                <span className="w-10 h-10 border-4 border-primary border-t-transparent rounded-full animate-spin mb-4" />
+                <h4 className="font-serif italic text-sm text-primary">Backend Layout Engine Processing</h4>
+                <p className="text-xs text-on-surface-variant mt-2 animate-pulse leading-relaxed">{statusMessage}</p>
               </div>
             </div>
           )}
 
           {analysisJob?.pages?.length ? (
-            <div className="absolute top-4 left-4 z-20 flex w-[260px] items-center gap-2 bg-[#0c0c0c]/90 border border-white/10 px-3 py-2 text-[10px] font-mono text-white/70">
+            <div className="absolute top-4 left-4 z-20 flex w-[260px] items-center gap-2 bg-surface-container-low/90 border border-outline-variant/40 px-3 py-2 text-[10px] font-mono text-on-surface-variant">
               <FileText className="h-3.5 w-3.5 shrink-0" />
-              <button onClick={goToPreviousPage} disabled={currentPageIndex <= 0} className="flex h-6 w-6 shrink-0 items-center justify-center text-white/70 hover:text-white disabled:cursor-not-allowed disabled:text-white/20" title="上一页">
+              <button onClick={goToPreviousPage} disabled={currentPageIndex <= 0} className="flex h-6 w-6 shrink-0 items-center justify-center text-on-surface-variant hover:text-primary disabled:cursor-not-allowed disabled:text-on-surface-variant/40" title="上一页">
                 <ChevronLeft className="h-3.5 w-3.5" />
               </button>
-              <select value={currentPageIndex} onChange={(e) => goToPage(Number(e.target.value))} className="min-w-0 flex-1 bg-transparent text-white focus:outline-none">
+              <select value={currentPageIndex} onChange={(e) => goToPage(Number(e.target.value))} className="min-w-0 flex-1 bg-transparent text-primary focus:outline-none">
                 {analysisJob.pages.map((page, idx) => (
                   <option key={page.page_id} value={idx}>Page {page.page_id + 1} · {page.status || 'pending'}</option>
                 ))}
               </select>
-              <button onClick={goToNextPage} disabled={currentPageIndex >= availablePageCount - 1} className="flex h-6 w-6 shrink-0 items-center justify-center text-white/70 hover:text-white disabled:cursor-not-allowed disabled:text-white/20" title="下一页">
+              <button onClick={goToNextPage} disabled={currentPageIndex >= availablePageCount - 1} className="flex h-6 w-6 shrink-0 items-center justify-center text-on-surface-variant hover:text-primary disabled:cursor-not-allowed disabled:text-on-surface-variant/40" title="下一页">
                 <ChevronRight className="h-3.5 w-3.5" />
               </button>
             </div>
           ) : selectedFile ? (
-            <div className="absolute top-4 left-4 z-20 bg-[#0c0c0c]/90 border border-white/10 px-3 py-2 text-[10px] font-mono text-white/60">
+            <div className="absolute top-4 left-4 z-20 bg-surface-container-low/90 border border-outline-variant/40 px-3 py-2 text-[10px] font-mono text-on-surface-variant">
               {selectedFile.name} ready for backend analysis
             </div>
           ) : null}
 
           <div className="overflow-auto max-w-full max-h-full p-12 flex items-center justify-center custom-scrollbar w-full h-full">
             <motion.div
-              className="relative bg-[#fafafc] shadow-2xl rounded-none transition-all overflow-hidden cursor-crosshair border border-white/10"
+              className="relative bg-surface-bright shadow-2xl rounded-[0.75rem] transition-all overflow-hidden cursor-crosshair border border-outline-variant/40"
               style={{
                 width: `${canvasWidth}px`,
                 height: `${canvasHeight}px`,
@@ -772,9 +772,9 @@ export default function Workspace({
               id="document-canvas-board"
             >
               {!canvasImage && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-8 bg-[#f4f4f5] text-black/45">
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-surface-container text-center p-8 text-on-surface-variant">
                   <FileText className="w-10 h-10 mb-3" />
-                  <p className="font-serif italic text-lg text-black/60">Select a PDF and start analysis</p>
+                  <p className="text-lg font-semibold text-on-surface-variant">Select a PDF and start analysis</p>
                 </div>
               )}
 
@@ -798,10 +798,10 @@ export default function Workspace({
                       zIndex: isSelected ? 15 : 10
                     }}
                   >
-                    <div className="absolute text-[9px] px-2 py-0.5 rounded-none text-white font-mono uppercase tracking-wider whitespace-nowrap -top-5 -left-[2px]" style={{ backgroundColor: colors.border }}>
+                    <div className="absolute text-[9px] px-2 py-0.5 rounded-[0.75rem] text-white font-mono uppercase tracking-wider whitespace-nowrap -top-5 -left-[2px]" style={{ backgroundColor: colors.border }}>
                       {seg.level ? `${seg.level} · ` : ''}{BLOCK_TYPE_LABELS[seg.type]}
                     </div>
-                    <button onClick={(e) => handleDeleteSegment(seg.id, e)} className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 hover:bg-rose-600 hover:text-white p-1 rounded-none transition-opacity bg-black/80 border border-white/10 text-white/80 shadow z-20">
+                    <button onClick={(e) => handleDeleteSegment(seg.id, e)} className="absolute top-1 right-1 z-20 rounded-[0.75rem] border border-outline-variant/40 bg-primary/80 p-1 text-on-primary opacity-0 shadow transition-opacity hover:bg-rose-600 group-hover:opacity-100">
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
@@ -809,81 +809,81 @@ export default function Workspace({
               })}
 
               {isDrawing && canvasContainerRef.current && (
-                <div className="absolute border-2 border-dashed border-white bg-white/10 pointer-events-none z-30" style={{ left: `${Math.min(startPos.x, currentDragPos.x)}px`, top: `${Math.min(startPos.y, currentDragPos.y)}px`, width: `${Math.abs(currentDragPos.x - startPos.x)}px`, height: `${Math.abs(currentDragPos.y - startPos.y)}px` }} />
+                <div className="absolute border-2 border-dashed border-primary bg-primary/10 pointer-events-none z-30" style={{ left: `${Math.min(startPos.x, currentDragPos.x)}px`, top: `${Math.min(startPos.y, currentDragPos.y)}px`, width: `${Math.abs(currentDragPos.x - startPos.x)}px`, height: `${Math.abs(currentDragPos.y - startPos.y)}px` }} />
               )}
             </motion.div>
           </div>
 
-          <div className="absolute bottom-8 left-1/2 -translate-x-1/2 bg-[#0c0c0c]/90 border border-white/10 backdrop-blur-md px-5 py-2.5 flex items-center gap-3 shadow-2xl z-25 select-none rounded-none text-white shadow-black/60">
-            <button onClick={handleUndo} disabled={historyPointer <= 0} className={`p-2 rounded-none transition-colors flex items-center justify-center ${historyPointer <= 0 ? 'text-white/20' : 'text-white hover:bg-white/5'}`} title="Undo Action"><Undo2 className="w-4 h-4" /></button>
-            <button onClick={handleRedo} disabled={historyPointer >= history.length - 1} className={`p-2 rounded-none transition-colors flex items-center justify-center ${historyPointer >= history.length - 1 ? 'text-white/20' : 'text-white hover:bg-white/5'}`} title="Redo Action"><Redo2 className="w-4 h-4" /></button>
-            <div className="w-px h-5 bg-white/10 mx-1" />
-            <button onClick={goToPreviousPage} disabled={!availablePageCount || currentPageIndex <= 0} className={`p-2 rounded-none transition-colors flex items-center justify-center ${!availablePageCount || currentPageIndex <= 0 ? 'text-white/20' : 'text-white/70 hover:text-white hover:bg-white/5'}`} title="上一页"><ChevronLeft className="w-4 h-4" /></button>
-            <span className="w-[72px] shrink-0 text-center text-[10px] font-mono font-bold text-white">
+          <div className="absolute bottom-8 left-1/2 -translate-x-1/2 bg-surface-container-low/90 border border-outline-variant/40 backdrop-blur-md px-5 py-2.5 flex items-center gap-3 shadow-2xl z-25 select-none rounded-[0.75rem] text-primary ">
+            <button onClick={handleUndo} disabled={historyPointer <= 0} className={`p-2 rounded-[0.75rem] transition-colors flex items-center justify-center ${historyPointer <= 0 ? 'text-on-surface-variant/40' : 'text-primary hover:bg-surface-container'}`} title="Undo Action"><Undo2 className="w-4 h-4" /></button>
+            <button onClick={handleRedo} disabled={historyPointer >= history.length - 1} className={`p-2 rounded-[0.75rem] transition-colors flex items-center justify-center ${historyPointer >= history.length - 1 ? 'text-on-surface-variant/40' : 'text-primary hover:bg-surface-container'}`} title="Redo Action"><Redo2 className="w-4 h-4" /></button>
+            <div className="w-px h-5 bg-surface-container-high mx-1" />
+            <button onClick={goToPreviousPage} disabled={!availablePageCount || currentPageIndex <= 0} className={`p-2 rounded-[0.75rem] transition-colors flex items-center justify-center ${!availablePageCount || currentPageIndex <= 0 ? 'text-on-surface-variant/40' : 'text-on-surface-variant hover:text-primary hover:bg-surface-container'}`} title="上一页"><ChevronLeft className="w-4 h-4" /></button>
+            <span className="w-[72px] shrink-0 text-center text-[10px] font-mono font-bold text-primary">
               {availablePageCount ? `${currentPageIndex + 1}/${availablePageCount}` : '-/-'}
             </span>
-            <button onClick={goToNextPage} disabled={!availablePageCount || currentPageIndex >= availablePageCount - 1} className={`p-2 rounded-none transition-colors flex items-center justify-center ${!availablePageCount || currentPageIndex >= availablePageCount - 1 ? 'text-white/20' : 'text-white/70 hover:text-white hover:bg-white/5'}`} title="下一页"><ChevronRight className="w-4 h-4" /></button>
-            <div className="w-px h-5 bg-white/10 mx-1" />
-            <button onClick={handleZoomOut} className="p-2 text-white/70 hover:text-white hover:bg-white/5 rounded-none transition-colors flex items-center justify-center" title="Zoom Out"><ZoomOut className="w-4 h-4" /></button>
-            <span className="text-[10px] font-mono font-bold text-white min-w-[40px] text-center">{Math.round(scale * 100)}%</span>
-            <button onClick={handleZoomIn} className="p-2 text-white/70 hover:text-white hover:bg-white/5 rounded-none transition-colors flex items-center justify-center" title="Zoom In"><ZoomIn className="w-4 h-4" /></button>
-            <div className="w-px h-5 bg-white/10 mx-1" />
-            <button onClick={handleResetZoom} className="p-2 text-white/70 hover:text-white hover:bg-white/5 rounded-none transition-colors flex items-center justify-center" title="Reset Zoom to Fit"><Maximize2 className="w-4 h-4" /></button>
+            <button onClick={goToNextPage} disabled={!availablePageCount || currentPageIndex >= availablePageCount - 1} className={`p-2 rounded-[0.75rem] transition-colors flex items-center justify-center ${!availablePageCount || currentPageIndex >= availablePageCount - 1 ? 'text-on-surface-variant/40' : 'text-on-surface-variant hover:text-primary hover:bg-surface-container'}`} title="下一页"><ChevronRight className="w-4 h-4" /></button>
+            <div className="w-px h-5 bg-surface-container-high mx-1" />
+            <button onClick={handleZoomOut} className="p-2 text-on-surface-variant hover:text-primary hover:bg-surface-container rounded-[0.75rem] transition-colors flex items-center justify-center" title="Zoom Out"><ZoomOut className="w-4 h-4" /></button>
+            <span className="text-[10px] font-mono font-bold text-primary min-w-[40px] text-center">{Math.round(scale * 100)}%</span>
+            <button onClick={handleZoomIn} className="p-2 text-on-surface-variant hover:text-primary hover:bg-surface-container rounded-[0.75rem] transition-colors flex items-center justify-center" title="Zoom In"><ZoomIn className="w-4 h-4" /></button>
+            <div className="w-px h-5 bg-surface-container-high mx-1" />
+            <button onClick={handleResetZoom} className="p-2 text-on-surface-variant hover:text-primary hover:bg-surface-container rounded-[0.75rem] transition-colors flex items-center justify-center" title="Reset Zoom to Fit"><Maximize2 className="w-4 h-4" /></button>
           </div>
         </section>
 
-        <aside className="w-[380px] h-full flex flex-col border-l border-white/10 bg-[#0c0c0c] z-20 flex-shrink-0 text-[#e5e5e5]">
-          <div className="flex border-b border-white/10 pt-4 px-4 bg-[#0c0c0c]">
-            <button onClick={() => setActiveTab('list')} className={`flex-1 pb-3 text-[10px] uppercase tracking-wider font-bold flex items-center justify-center gap-2 border-b-2 transition-all cursor-pointer ${activeTab === 'list' ? 'text-white border-white' : 'text-white/40 hover:text-white border-transparent'}`}>
+        <aside className="w-[380px] h-full flex flex-col border-l border-outline-variant/40 bg-surface-container-low z-20 flex-shrink-0 text-on-surface">
+          <div className="flex border-b border-outline-variant/40 pt-4 px-4 bg-surface-container-low">
+            <button onClick={() => setActiveTab('list')} className={`flex-1 pb-3 text-[10px] uppercase tracking-wider font-bold flex items-center justify-center gap-2 border-b-2 transition-all cursor-pointer ${activeTab === 'list' ? 'text-primary border-primary' : 'text-on-surface-variant hover:text-primary border-transparent'}`}>
               <List className="w-4 h-4" /><span>Blocks Identified</span>
             </button>
-            <button onClick={() => setActiveTab('json')} className={`flex-1 pb-3 text-[10px] uppercase tracking-wider font-bold flex items-center justify-center gap-2 border-b-2 transition-all cursor-pointer ${activeTab === 'json' ? 'text-white border-white' : 'text-white/40 hover:text-white border-transparent'}`}>
+            <button onClick={() => setActiveTab('json')} className={`flex-1 pb-3 text-[10px] uppercase tracking-wider font-bold flex items-center justify-center gap-2 border-b-2 transition-all cursor-pointer ${activeTab === 'json' ? 'text-primary border-primary' : 'text-on-surface-variant hover:text-primary border-transparent'}`}>
               <Code2 className="w-4 h-4" /><span>JSON Payload</span>
             </button>
           </div>
 
-          <div className="p-4 border-b border-white/5 bg-white/[0.01] text-xs text-white/45">
+          <div className="p-4 border-b border-outline-variant/30 bg-surface-container text-xs text-on-surface-variant">
             <div className="grid grid-cols-3 gap-2 mb-3">
-              <div className="border border-white/10 bg-white/[0.02] p-2"><b className="block text-white text-base font-mono">{displayedPageCount || '-'}</b><span className="text-[9px] uppercase tracking-wider">Pages</span></div>
-              <div className="border border-white/10 bg-white/[0.02] p-2"><b className="block text-white text-base font-mono">{visibleSegments.length}</b><span className="text-[9px] uppercase tracking-wider">Blocks</span></div>
-              <div className="border border-white/10 bg-white/[0.02] p-2"><b className="block text-white text-base font-mono">{analysisJob?.errors?.length || 0}</b><span className="text-[9px] uppercase tracking-wider">Errors</span></div>
+              <div className="border border-outline-variant/40 bg-surface-container p-2"><b className="block text-primary text-base font-mono">{displayedPageCount || '-'}</b><span className="text-[9px] uppercase tracking-wider">Pages</span></div>
+              <div className="border border-outline-variant/40 bg-surface-container p-2"><b className="block text-primary text-base font-mono">{visibleSegments.length}</b><span className="text-[9px] uppercase tracking-wider">Blocks</span></div>
+              <div className="border border-outline-variant/40 bg-surface-container p-2"><b className="block text-primary text-base font-mono">{analysisJob?.errors?.length || 0}</b><span className="text-[9px] uppercase tracking-wider">Errors</span></div>
             </div>
             <div className="flex justify-between items-center">
               <span className="font-mono">{currentPageSegments.length} blocks on current page</span>
-              <button onClick={handleClearAll} className="hover:underline font-bold text-white/80 cursor-pointer">Clear Local Map</button>
+              <button onClick={handleClearAll} className="hover:underline font-bold text-on-surface cursor-pointer">Clear Local Map</button>
             </div>
           </div>
 
-          <div className="flex-grow overflow-y-auto custom-scrollbar p-4 bg-[#0c0c0c]">
+          <div className="flex-grow overflow-y-auto custom-scrollbar p-4 bg-surface-container-low">
             <AnimatePresence mode="wait">
               {activeTab === 'list' ? (
                 <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -10 }} className="flex flex-col gap-3">
                   {currentPageSegments.length === 0 ? (
                     <div className="text-center py-16 px-4">
-                      <AlertTriangle className="w-8 h-8 mx-auto text-white/35 mb-3" />
-                      <p className="text-white/50 text-xs">No backend blocks matching the current filters on this page.</p>
-                      <button onClick={handleStartAnalysis} className="mt-4 text-xs font-bold underline text-white/80 hover:text-white">Run backend analysis</button>
+                      <AlertTriangle className="w-8 h-8 mx-auto text-on-surface-variant mb-3" />
+                      <p className="text-on-surface-variant text-xs">No backend blocks matching the current filters on this page.</p>
+                      <button onClick={handleStartAnalysis} className="mt-4 text-xs font-bold underline text-on-surface hover:text-primary">Run backend analysis</button>
                     </div>
                   ) : currentPageSegments.map((seg) => {
                     const colors = getColorSchema(seg.type);
                     const isSelected = selectedSegmentId === seg.id;
                     return (
-                      <div key={seg.id} onMouseEnter={() => setSelectedSegmentId(seg.id)} onMouseLeave={() => setSelectedSegmentId(null)} className={`bg-[#0e0e0e] border p-3.5 flex flex-col gap-2.5 transition-all cursor-pointer relative group rounded-none ${isSelected ? 'border-white/40 bg-white/[0.03] shadow-lg shadow-black/30' : 'border-white/5 hover:border-white/10'}`}>
+                      <div key={seg.id} onMouseEnter={() => setSelectedSegmentId(seg.id)} onMouseLeave={() => setSelectedSegmentId(null)} className={`bg-surface-container-lowest border p-3.5 flex flex-col gap-2.5 transition-all cursor-pointer relative group rounded-[0.75rem] ${isSelected ? 'border-primary/50 bg-surface-container shadow-lg ' : 'border-outline-variant/30 hover:border-outline-variant/40'}`}>
                         <div className="flex justify-between items-center">
                           <div className="flex items-center gap-2 select-none">
-                            <div className="w-1.5 h-1.5 rounded-none" style={{ backgroundColor: colors.border }} />
-                            <span className="text-[10px] font-mono font-bold text-white uppercase tracking-wider">{seg.level ? `${seg.level} · ` : ''}{BLOCK_TYPE_LABELS[seg.type]}</span>
+                            <div className="w-1.5 h-1.5 rounded-[0.75rem]" style={{ backgroundColor: colors.border }} />
+                            <span className="text-[10px] font-mono font-bold text-primary uppercase tracking-wider">{seg.level ? `${seg.level} · ` : ''}{BLOCK_TYPE_LABELS[seg.type]}</span>
                           </div>
-                          <span className="text-[9px] font-mono bg-white/10 px-1.5 py-0.5 rounded-none text-white/80 border border-white/5 font-bold">p{(seg.pageId || 0) + 1}</span>
+                          <span className="text-[9px] font-mono bg-surface-container-high px-1.5 py-0.5 rounded-[0.75rem] text-on-surface border border-outline-variant/30 font-bold">p{(seg.pageId || 0) + 1}</span>
                         </div>
                         {seg.type === 'table' ? (
-                          <div className="flex items-center gap-2 bg-white/[0.02] p-2 rounded-none text-xs text-white/80 font-medium border border-white/5"><Table className="w-4 h-4 text-white/50" /><span className="truncate font-serif italic text-white/60">{seg.text}</span></div>
+                          <div className="flex items-center gap-2 bg-surface-container p-2 rounded-[0.75rem] text-xs text-on-surface font-medium border border-outline-variant/30"><Table className="w-4 h-4 text-on-surface-variant" /><span className="truncate font-serif italic text-on-surface-variant">{seg.text}</span></div>
                         ) : seg.type === 'image' || seg.type === 'figure_title' ? (
-                          <div className="flex items-center gap-2 bg-white/[0.02] p-2 rounded-none text-xs text-white/80 font-medium border border-white/5"><ImageIcon className="w-4 h-4 text-white/50" /><span className="truncate font-serif italic text-white/60">{seg.text}</span></div>
+                          <div className="flex items-center gap-2 bg-surface-container p-2 rounded-[0.75rem] text-xs text-on-surface font-medium border border-outline-variant/30"><ImageIcon className="w-4 h-4 text-on-surface-variant" /><span className="truncate font-serif italic text-on-surface-variant">{seg.text}</span></div>
                         ) : (
-                          <p className="text-xs text-white/60 leading-relaxed line-clamp-3 font-sans">{seg.text}</p>
+                          <p className="text-xs text-on-surface-variant leading-relaxed line-clamp-3 font-sans">{seg.text}</p>
                         )}
-                        <button onClick={(e) => handleDeleteSegment(seg.id, e)} className="absolute top-2.5 right-2.5 opacity-0 group-hover:opacity-100 text-white/40 hover:text-rose-500 font-bold transition-all p-1 rounded-none hover:bg-white/5"><Trash2 className="w-4 h-4" /></button>
+                        <button onClick={(e) => handleDeleteSegment(seg.id, e)} className="absolute top-2.5 right-2.5 opacity-0 group-hover:opacity-100 text-on-surface-variant hover:text-rose-500 font-bold transition-all p-1 rounded-[0.75rem] hover:bg-surface-container"><Trash2 className="w-4 h-4" /></button>
                       </div>
                     );
                   })}
@@ -891,8 +891,8 @@ export default function Workspace({
               ) : (
                 <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 10 }} className="h-full flex flex-col gap-2 font-mono text-[11px]">
                   <div className="relative">
-                    <pre className="bg-[#0e0e0e] text-[#858383] p-4 rounded-none border border-white/10 overflow-x-auto select-text custom-scrollbar leading-relaxed"><code className="text-stone-300">{getJsonRepresentation()}</code></pre>
-                    <button onClick={() => { navigator.clipboard.writeText(getJsonRepresentation()); alert('JSON mappings copied to clipboard!'); }} className="absolute top-2 right-2 px-2.5 py-1 text-[9px] uppercase tracking-wider font-bold bg-[#141414] border border-white/10 text-white/80 hover:bg-white hover:text-black rounded-none transition-colors">Copy</button>
+                    <pre className="bg-surface-container-lowest text-on-surface-variant p-4 rounded-[0.75rem] border border-outline-variant/40 overflow-x-auto select-text custom-scrollbar leading-relaxed"><code className="text-on-surface">{getJsonRepresentation()}</code></pre>
+                    <button onClick={() => { navigator.clipboard.writeText(getJsonRepresentation()); alert('JSON mappings copied to clipboard!'); }} className="absolute top-2 right-2 px-2.5 py-1 text-[9px] uppercase tracking-wider font-bold bg-surface-container border border-outline-variant/40 text-on-surface hover:bg-primary hover:text-on-primary rounded-[0.75rem] transition-colors">Copy</button>
                   </div>
                 </motion.div>
               )}
@@ -904,27 +904,27 @@ export default function Workspace({
       <AnimatePresence>
         {newBoxModalOpen && drawnBoxPercent && (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 select-none">
-            <div className="bg-[#0e0e0e] rounded-none p-6 max-w-sm w-full border border-white/10 shadow-2xl relative text-white">
-              <h3 className="font-serif italic text-base text-white mb-4">Annotate Backend Block</h3>
+            <div className="bg-surface-container-lowest rounded-[0.75rem] p-6 max-w-sm w-full border border-outline-variant/40 shadow-2xl relative text-primary">
+              <h3 className="font-serif italic text-base text-primary mb-4">Annotate Backend Block</h3>
               <div className="space-y-4">
                 <div>
-                  <label className="block text-[9px] font-mono font-bold uppercase tracking-wider text-white/50 mb-1">Block Classification</label>
-                  <select value={newBoxType} onChange={(e) => setNewBoxType(e.target.value as BackendBlockType)} className="w-full px-3 py-1.5 bg-[#0c0c0c] border border-white/10 rounded-none text-xs font-serif italic text-white focus:outline-none focus:border-white/30">
+                  <label className="block text-[9px] font-mono font-bold uppercase tracking-wider text-on-surface-variant mb-1">Block Classification</label>
+                  <select value={newBoxType} onChange={(e) => setNewBoxType(e.target.value as BackendBlockType)} className="w-full px-3 py-1.5 bg-surface-container-low border border-outline-variant/40 rounded-[0.75rem] text-xs font-serif italic text-primary focus:outline-none focus:border-outline-variant/70">
                     {BLOCK_TYPES.map((type) => <option key={type} value={type}>{BLOCK_TYPE_LABELS[type]}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label className="block text-[9px] font-mono font-bold uppercase tracking-wider text-white/50 mb-1">Transcription</label>
-                  <input type="text" required placeholder="Transcribe block text or descriptive name..." value={newBoxText} onChange={(e) => setNewBoxText(e.target.value)} className="w-full px-3 py-1.5 bg-[#0c0c0c] border border-white/10 rounded-none text-xs text-white placeholder-white/30 focus:outline-none focus:border-white/30" />
+                  <label className="block text-[9px] font-mono font-bold uppercase tracking-wider text-on-surface-variant mb-1">Transcription</label>
+                  <input type="text" required placeholder="Transcribe block text or descriptive name..." value={newBoxText} onChange={(e) => setNewBoxText(e.target.value)} className="w-full px-3 py-1.5 bg-surface-container-low border border-outline-variant/40 rounded-[0.75rem] text-xs text-primary placeholder:text-on-surface-variant focus:outline-none focus:border-outline-variant/70" />
                 </div>
-                <div className="bg-white/[0.01] p-3 rounded-none border border-white/5 text-[10px] text-white/50 font-mono">
-                  <span className="block font-bold text-white/70 mb-0.5 uppercase tracking-wider">Calculated Bounding Box</span>
+                <div className="bg-surface-container p-3 rounded-[0.75rem] border border-outline-variant/30 text-[10px] text-on-surface-variant font-mono">
+                  <span className="block font-bold text-on-surface-variant mb-0.5 uppercase tracking-wider">Calculated Bounding Box</span>
                   <span>Top: {drawnBoxPercent[0]}%, Left: {drawnBoxPercent[1]}%, Width: {drawnBoxPercent[2]}%, Height: {drawnBoxPercent[3]}%</span>
                 </div>
               </div>
-              <div className="mt-5 flex justify-end gap-3 pt-3 border-t border-white/10">
-                <button onClick={() => { setNewBoxModalOpen(false); setDrawnBoxPercent(null); }} className="px-3.5 py-1.5 text-[10px] uppercase tracking-wider font-bold border border-white/10 hover:bg-white/5 rounded-none text-white/80 cursor-pointer">Cancel</button>
-                <button onClick={handleCreateDrawnBox} className="px-4 py-1.5 text-[10px] uppercase tracking-wider font-bold bg-white text-black hover:bg-white/90 rounded-none cursor-pointer">Create Label</button>
+              <div className="mt-5 flex justify-end gap-3 pt-3 border-t border-outline-variant/40">
+                <button onClick={() => { setNewBoxModalOpen(false); setDrawnBoxPercent(null); }} className="px-3.5 py-1.5 text-[10px] uppercase tracking-wider font-bold border border-outline-variant/40 hover:bg-surface-container rounded-[0.75rem] text-on-surface cursor-pointer">Cancel</button>
+                <button onClick={handleCreateDrawnBox} className="px-4 py-1.5 text-[10px] uppercase tracking-wider font-bold bg-primary text-on-primary hover:bg-primary/90 rounded-[0.75rem] cursor-pointer">Create Label</button>
               </div>
             </div>
           </div>

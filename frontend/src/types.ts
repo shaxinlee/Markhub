@@ -155,7 +155,7 @@ export interface BackendBlock {
   page_id: number;
   block_type: BackendBlockType;
   weak_heading?: boolean;
-  level?: 'H1' | 'H2' | 'H3' | null;
+  level?: 'H1' | 'H2' | 'H3' | 'H4' | null;
 }
 
 export interface BackendPage {
@@ -204,7 +204,7 @@ export interface AnnotationSegment {
   text: string;
   confidence: number;
   pageId?: number;
-  level?: 'H1' | 'H2' | 'H3' | null;
+  level?: 'H1' | 'H2' | 'H3' | 'H4' | null;
   weakHeading?: boolean;
   bbox?: [number, number, number, number];
 }

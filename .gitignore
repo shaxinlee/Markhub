@@ -33,3 +33,4 @@ frontend/*.log
 # Local project tools
 .tools/
 .claude/
+evaluation/

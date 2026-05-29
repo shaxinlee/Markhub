@@ -205,7 +205,7 @@ export default function PromptManagementPage() {
   }
 
   return (
-    <section className="flex h-full w-full overflow-hidden bg-surface-container-low text-on-surface">
+    <section className="flex min-h-[calc(100vh-4rem)] w-full overflow-hidden bg-surface-container-low text-on-surface">
       <aside className="hidden w-72 shrink-0 border-r border-outline-variant/40 bg-surface-container-lowest p-6 lg:block">
         <div className="mb-8">
           <span className="text-label-sm font-bold uppercase tracking-[0.24em] text-on-surface-variant">Prompt Center</span>
@@ -282,11 +282,11 @@ export default function PromptManagementPage() {
       </div>
 
       {fullScreenEditor && (
-        <div className="fixed inset-0 z-50 bg-black/80 p-6 backdrop-blur">
-          <div className="flex h-full flex-col border border-white/10 bg-[#0e0e0e] p-5 text-white">
+        <div className="fixed inset-0 z-50 bg-black/30 p-6 backdrop-blur">
+          <div className="flex h-full flex-col rounded-[1.5rem] border border-outline-variant/60 bg-surface-container-lowest p-5 text-on-surface shadow-[0_24px_80px_rgba(0,0,0,0.12)]">
             <div className="mb-4 flex items-center justify-between">
               <h3 className="text-headline-sm font-semibold">全屏编辑 Prompt</h3>
-              <button onClick={() => setFullScreenEditor(false)} className="rounded bg-white/10 p-2 hover:bg-white/20"><X className="h-5 w-5" /></button>
+              <button onClick={() => setFullScreenEditor(false)} className="rounded-full p-2 text-on-surface-variant hover:bg-surface-container"><X className="h-5 w-5" /></button>
             </div>
             <CodeEditor value={draft.content} onChange={(content) => setDraft({ ...draft, content })} className="min-h-0 flex-1" />
           </div>
@@ -395,6 +395,8 @@ function PromptPanel({
 }) {
   const editing = mode === 'edit' || mode === 'create';
   const target = editing ? draft : prompt;
+  const contentLineCount = target?.content ? target.content.split('\n').length : 0;
+  const contentCharCount = target?.content?.length || 0;
   return (
     <aside className="min-h-0 overflow-auto border-l border-outline-variant/40 bg-surface-container-lowest p-6">
       {!target ? (
@@ -424,23 +426,42 @@ function PromptPanel({
           </div>
           <Field label="提示词描述" value={draft.description} disabled={!editing} onChange={(value) => onDraftChange({ ...draft, description: value })} />
 
-          <div>
-            <div className="mb-2 flex items-center justify-between">
-              <label className="text-label-sm font-bold uppercase tracking-wider text-on-surface-variant">Prompt 内容</label>
-              <div className="flex gap-2">
-                <button type="button" onClick={() => navigator.clipboard.writeText(draft.content)} className="rounded border border-outline-variant/50 px-2 py-1 text-label-sm">复制</button>
-                <button type="button" onClick={() => formatDraftContent(draft, onDraftChange)} disabled={!editing} className="rounded border border-outline-variant/50 px-2 py-1 text-label-sm disabled:opacity-40">格式化</button>
-                <button type="button" onClick={onFullScreen} className="rounded border border-outline-variant/50 px-2 py-1 text-label-sm"><Maximize2 className="h-3.5 w-3.5" /></button>
+          {editing ? (
+            <>
+              <div>
+                <div className="mb-2 flex items-center justify-between">
+                  <label className="text-label-sm font-bold uppercase tracking-wider text-on-surface-variant">Prompt 内容</label>
+                  <div className="flex gap-2">
+                    <button type="button" onClick={() => navigator.clipboard.writeText(draft.content)} className="rounded border border-outline-variant/50 px-2 py-1 text-label-sm">复制</button>
+                    <button type="button" onClick={() => formatDraftContent(draft, onDraftChange)} className="rounded border border-outline-variant/50 px-2 py-1 text-label-sm">格式化</button>
+                    <button type="button" onClick={onFullScreen} className="rounded border border-outline-variant/50 px-2 py-1 text-label-sm"><Maximize2 className="h-3.5 w-3.5" /></button>
+                  </div>
+                </div>
+                <CodeEditor value={draft.content} onChange={(value) => onDraftChange({ ...draft, content: value })} />
               </div>
-            </div>
-            <CodeEditor value={draft.content} onChange={(value) => onDraftChange({ ...draft, content: value })} disabled={!editing} />
-          </div>
 
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-            <TextareaField label="变量参数说明" value={stringifyLoose(draft.variables)} disabled={!editing} onChange={(value) => onDraftChange({ ...draft, variables: value })} />
-            <TextareaField label="默认变量值 JSON" value={JSON.stringify(draft.default_values || {}, null, 2)} disabled={!editing} onChange={(value) => onDraftChange({ ...draft, default_values: parseJsonObject(value) })} />
-          </div>
-          <TextareaField label="备注" value={draft.notes || ''} disabled={!editing} onChange={(value) => onDraftChange({ ...draft, notes: value })} />
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                <TextareaField label="变量参数说明" value={stringifyLoose(draft.variables)} disabled={false} onChange={(value) => onDraftChange({ ...draft, variables: value })} />
+                <TextareaField label="默认变量值 JSON" value={JSON.stringify(draft.default_values || {}, null, 2)} disabled={false} onChange={(value) => onDraftChange({ ...draft, default_values: parseJsonObject(value) })} />
+              </div>
+              <TextareaField label="备注" value={draft.notes || ''} disabled={false} onChange={(value) => onDraftChange({ ...draft, notes: value })} />
+            </>
+          ) : (
+            <section className="rounded-[0.75rem] border border-outline-variant/40 bg-surface-container p-4">
+              <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
+                <div>
+                  <h4 className="text-label-md font-bold text-primary">Prompt 内容</h4>
+                  <p className="mt-1 text-label-md text-on-surface-variant">
+                    当前内容已收起，共 {contentLineCount} 行、{contentCharCount} 个字符。
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" onClick={() => navigator.clipboard.writeText(target.content || '')} className="rounded-[0.75rem] border border-outline-variant/50 px-3 py-2 text-label-md font-semibold text-primary hover:bg-surface-container-high">复制</button>
+                  <button type="button" onClick={onEdit} className="rounded-[0.75rem] bg-primary px-4 py-2 text-label-md font-semibold text-on-primary hover:bg-primary/90">编辑提示词</button>
+                </div>
+              </div>
+            </section>
+          )}
 
           <div className="flex flex-wrap gap-4 border-y border-outline-variant/40 py-4 text-label-md">
             <label className="flex items-center gap-2"><input type="checkbox" checked={draft.status === 'enabled'} disabled={!editing} onChange={(event) => onDraftChange({ ...draft, status: event.target.checked ? 'enabled' : 'disabled', is_default: event.target.checked ? draft.is_default : false })} />启用</label>
@@ -470,7 +491,7 @@ function PromptPanel({
               <div className="space-y-2 rounded border border-outline-variant/40 bg-surface-container p-3 text-label-sm">
                 <p>状态：{testResult.success ? '成功' : '失败'} · 模型：{testResult.model_name || '-'} · 耗时：{testResult.elapsed_ms}ms</p>
                 {testResult.error && <p className="text-error">错误：{testResult.error}</p>}
-                <pre className="max-h-44 overflow-auto whitespace-pre-wrap rounded bg-black/80 p-3 font-mono text-white">{testResult.rendered_prompt}</pre>
+                <pre className="max-h-44 overflow-auto whitespace-pre-wrap rounded bg-surface-container-lowest p-3 font-mono text-on-surface">{testResult.rendered_prompt}</pre>
                 <pre className="max-h-32 overflow-auto whitespace-pre-wrap rounded bg-surface-container-high p-3">{testResult.model_output}</pre>
               </div>
             )}
@@ -484,8 +505,8 @@ function PromptPanel({
 function CodeEditor({ value, onChange, disabled = false, className = '' }: { value: string; onChange: (value: string) => void; disabled?: boolean; className?: string }) {
   const lineCount = Math.max(1, value.split('\n').length);
   return (
-    <div className={`flex min-h-[280px] overflow-hidden rounded border border-outline-variant/50 bg-[#0e0e0e] text-white ${className}`}>
-      <div className="select-none border-r border-white/10 bg-black/20 px-3 py-3 text-right font-mono text-xs leading-6 text-white/35">
+    <div className={`flex min-h-[280px] overflow-hidden rounded border border-outline-variant/50 bg-surface-container-lowest text-on-surface ${className}`}>
+      <div className="select-none border-r border-outline-variant/40 bg-surface-container px-3 py-3 text-right font-mono text-xs leading-6 text-on-surface-variant">
         {Array.from({ length: lineCount }, (_, index) => <div key={index}>{index + 1}</div>)}
       </div>
       <textarea
@@ -494,7 +515,7 @@ function CodeEditor({ value, onChange, disabled = false, className = '' }: { val
         disabled={disabled}
         wrap="soft"
         spellCheck={false}
-        className="min-h-full flex-1 resize-none bg-transparent p-3 font-mono text-xs leading-6 text-white outline-none disabled:text-white/70"
+        className="min-h-full flex-1 resize-none bg-transparent p-3 font-mono text-xs leading-6 text-on-surface outline-none disabled:text-on-surface-variant"
       />
     </div>
   );

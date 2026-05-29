@@ -33,6 +33,7 @@ from .schemas import (
     VisionResizeConfig,
 )
 from .paths import LLAMAFACTORY_DATASETS_DIR, SWIFT_DATASETS_DIR
+from .prompts import prompt_fragment
 from .storage import (
     annotation_file_for,
     clean_old_jobs,
@@ -72,8 +73,8 @@ from .utils import (
 )
 
 
-DEFAULT_SWIFT_USER_PROMPT = "<image>\n请识别图片中的所有主要版面块，并按照阅读顺序输出严格合法的 JSON。"
-DEFAULT_LLAMAFACTORY_INSTRUCTION = "<image>\n请识别图片中的所有主要版面块，并按照阅读顺序输出严格合法的 JSON。"
+DEFAULT_SWIFT_USER_PROMPT = prompt_fragment("training", "swift_user")
+DEFAULT_LLAMAFACTORY_INSTRUCTION = prompt_fragment("training", "llamafactory_instruction")
 
 
 # --------------------------------------------------------------------------
@@ -155,14 +156,77 @@ def image_to_data_url(image_path: Path) -> str:
     return f"data:image/png;base64,{encoded}"
 
 
-def call_layout_llm(model_page: ModelPageImage, original_page: PageImage, config: LLMConfig, prompt_template: PromptTemplate) -> Dict[str, Any]:
-    client = OpenAI(api_key=config.api_key or "EMPTY", base_url=config.base_url)
-    user_text = (
-        f"当前页面 page_id={model_page.page_id}。你看到的是标准检查图，尺寸为 "
-        f"{model_page.width}x{model_page.height} 像素。"
-        "请严格输出 0-1000 相对坐标 bbox，不要输出像素坐标。"
-        "页面内容可能在白色标准画布中等比居中，请只框文档内容区域内的版面块。"
+def build_heading_context(prior_blocks: List[Dict[str, Any]], recent_limit: int = 8, max_entries: int = 12, text_limit: int = 40) -> str:
+    """Build a compact heading outline from already-analyzed pages.
+
+    Per-page level detection is unreliable when a page contains only a few
+    headings, so we feed the model a running outline of prior headings to keep
+    levels consistent across pages. To avoid bloating the prompt we include only
+    two things: the active ancestor path (breadcrumb of the last heading) and the
+    most recent N headings, capped at ``max_entries`` total.
+    """
+    headings = [
+        b
+        for b in prior_blocks
+        if isinstance(b, dict)
+        and b.get("block_type") in {"doc_title", "paragraph_title"}
+        and b.get("level") in LEVELS
+    ]
+    if not headings:
+        return ""
+
+    level_rank = {"H1": 1, "H2": 2, "H3": 3, "H4": 4}
+
+    def clip(text: Any) -> str:
+        compact = re.sub(r"\s+", " ", str(text or "")).strip()
+        return compact[:text_limit] + ("…" if len(compact) > text_limit else "")
+
+    # Active ancestor path: the breadcrumb of the most recent heading. Seeing a
+    # heading at rank R clears any tracked level deeper than R.
+    path: Dict[str, str] = {}
+    for block in headings:
+        level = block["level"]
+        rank = level_rank[level]
+        path = {lvl: txt for lvl, txt in path.items() if level_rank[lvl] < rank}
+        path[level] = clip(block.get("text"))
+
+    lines: List[str] = [prompt_fragment("heading_context", "header")]
+    if path:
+        lines.append(prompt_fragment("heading_context", "path_label"))
+        for level in ("H1", "H2", "H3", "H4"):
+            if level in path:
+                lines.append(f"{'  ' * level_rank[level]}{level}: {path[level]}")
+
+    recent = headings[-recent_limit:]
+    if len(recent) > max_entries:
+        recent = recent[-max_entries:]
+    if recent:
+        lines.append(prompt_fragment("heading_context", "recent_label"))
+        for block in recent:
+            lines.append(f"  {block['level']} {clip(block.get('text'))}")
+
+    return "\n".join(lines)
+
+
+def build_page_user_text(model_page: ModelPageImage, heading_context: str = "") -> str:
+    """Assemble the per-page user prompt actually sent to the model. The heading
+    context varies page to page, so each page's prompt differs slightly."""
+    user_text = prompt_fragment("page_user_text").format(
+        page_id=model_page.page_id,
+        width=model_page.width,
+        height=model_page.height,
     )
+    if heading_context:
+        user_text += "\n\n" + heading_context
+    return user_text
+
+
+def call_layout_llm(model_page: ModelPageImage, original_page: PageImage, config: LLMConfig, prompt_template: PromptTemplate, heading_context: str = "") -> Tuple[Dict[str, Any], Dict[str, str]]:
+    """Run one page through the model. Returns the parsed payload plus the exact
+    prompt fed to the model (``{"system", "user"}``) so it can be persisted as a
+    fine-tuning input alongside the result."""
+    client = OpenAI(api_key=config.api_key or "EMPTY", base_url=config.base_url)
+    user_text = build_page_user_text(model_page, heading_context)
     image_item = {
         "type": "image_url",
         "image_url": {"url": image_to_data_url(model_page.image_path)},
@@ -188,7 +252,8 @@ def call_layout_llm(model_page: ModelPageImage, original_page: PageImage, config
         extra_body={"enable_thinking": False},
     )
     content = completion.choices[0].message.content if completion.choices else ""
-    return parse_model_json(content or "")
+    model_input = {"system": prompt_template.prompt, "user": user_text}
+    return parse_model_json(content or ""), model_input
 
 
 def parse_model_json(content: str) -> Dict[str, Any]:
@@ -323,6 +388,8 @@ def infer_heading_level(text: str) -> Optional[str]:
     if re.match(r"^[一二三四五六七八九十]+[、.．]", compact):
         return "H1"
     if re.match(r"^\d+[、.．]", compact):
+        if re.match(r"^\d+[.．]\d+[.．]\d+", compact):
+            return "H4"
         if re.match(r"^\d+[.．]\d+", compact):
             return "H3"
         return "H2"
@@ -477,10 +544,12 @@ def process_job_pages(
         state["pages"][page.page_id]["status"] = "processing"
         write_job_result(job_id, state)
 
+        heading_context = build_heading_context(state["result"].get("blocks", []))
+
         model_page: Optional[ModelPageImage] = None
         try:
             model_page = resize_page_for_model(page, job_dir=find_job_dir(job_id), config=resize_config)
-            payload = call_layout_llm(model_page, original_page=page, config=llm_config, prompt_template=prompt_template)
+            payload, model_input = call_layout_llm(model_page, original_page=page, config=llm_config, prompt_template=prompt_template, heading_context=heading_context)
             blocks, block_warnings = normalize_blocks(payload, model_page=model_page, original_page=page)
 
             state = read_job_result(job_id)
@@ -489,6 +558,7 @@ def process_job_pages(
                     "status": "done",
                     "blocks": blocks,
                     "raw": payload,
+                    "model_input": model_input,
                     "model_image_url": model_page.image_url,
                     "model_width": model_page.width,
                     "model_height": model_page.height,
@@ -532,6 +602,7 @@ def process_job_pages(
     state["completed_pages"] = count_finished_pages(state["pages"])
     state["result"]["blocks"] = collect_done_blocks(state["pages"])
     write_job_result(job_id, state)
+    write_training_jsonl(job_id, state)
 
 
 def collect_done_blocks(pages: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -546,6 +617,73 @@ def collect_done_blocks(pages: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]
         return int(block.get("page_id", 0)), int(bbox[1]), int(bbox[0])
     blocks.sort(key=sort_key)
     return blocks
+
+
+# --------------------------------------------------------------------------
+# Per-page training samples (default template; exporters convert from this)
+# --------------------------------------------------------------------------
+
+def default_model_input(page: Dict[str, Any]) -> Dict[str, str]:
+    """Best-effort prompt reconstruction for pages saved before ``model_input``
+    was captured. New pages always carry the real prompt; this only gives legacy
+    datasets a sane fallback (no heading context, empty system)."""
+    width = int(page.get("model_width") or page.get("width") or 0)
+    height = int(page.get("model_height") or page.get("height") or 0)
+    user = prompt_fragment("page_user_text").format(page_id=int(page.get("page_id") or 0), width=width, height=height)
+    return {"system": "", "user": user}
+
+
+def resolve_model_input(*candidates: Any, fallback_page: Optional[Dict[str, Any]] = None) -> Dict[str, str]:
+    """Pick the first usable ``{"system","user"}`` from the given candidates,
+    falling back to a reconstructed prompt for legacy pages."""
+    for candidate in candidates:
+        if isinstance(candidate, dict) and (candidate.get("system") or candidate.get("user")):
+            return {"system": str(candidate.get("system") or ""), "user": str(candidate.get("user") or "")}
+    return default_model_input(fallback_page or {})
+
+
+def ensure_image_token(user_text: str) -> str:
+    """Vision training formats expect an ``<image>`` placeholder in the prompt;
+    the stored per-page user text omits it, so prepend one when missing."""
+    return user_text if "<image>" in user_text else "<image>\n" + user_text
+
+
+def training_jsonl_path(job_id: str) -> Path:
+    return find_job_dir(job_id) / "training_samples.jsonl"
+
+
+def build_training_lines(payload: Dict[str, Any], blocks_by_page: Optional[Dict[int, List[Dict[str, Any]]]] = None) -> List[Dict[str, Any]]:
+    """One entry per page: the exact prompt sent to the model (structured
+    ``system`` / ``user``) plus the page blocks as the target output. This is the
+    format-agnostic default training template; the swift / llamafactory exporters
+    convert from the same per-page prompt into their respective layouts."""
+    lines: List[Dict[str, Any]] = []
+    for page in payload.get("pages", []):
+        if not isinstance(page, dict):
+            continue
+        page_id = int(page.get("page_id") or 0)
+        raw_blocks = blocks_by_page.get(page_id, []) if blocks_by_page is not None else page.get("blocks", [])
+        blocks = [normalize_export_block(block) for block in (raw_blocks or []) if isinstance(block, dict)]
+        model_input = resolve_model_input(page.get("model_input"), fallback_page=page)
+        lines.append(
+            {
+                "page_id": page_id,
+                "image": str(page.get("image_url") or ""),
+                "input": {"system": model_input["system"], "user": model_input["user"]},
+                "output": {"blocks": blocks, "context_before": "", "context_after": ""},
+            }
+        )
+    return lines
+
+
+def write_training_jsonl(job_id: str, payload: Dict[str, Any], blocks_by_page: Optional[Dict[int, List[Dict[str, Any]]]] = None) -> Path:
+    """Persist the per-page default training template (one JSON object per line)."""
+    path = training_jsonl_path(job_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as handle:
+        for line in build_training_lines(payload, blocks_by_page):
+            handle.write(sanitize_saved_text(json.dumps(line, ensure_ascii=False)) + "\n")
+    return path
 
 
 # --------------------------------------------------------------------------
@@ -685,6 +823,9 @@ def build_annotation_payload(job_id: str, payload: Dict[str, Any], version: str,
                 "width": page.get("width", 0),
                 "height": page.get("height", 0),
                 "blocks": [normalize_annotation_block(block, page_id) for block in raw_blocks if isinstance(block, dict)],
+                # The prompt is the model's input, not annotator-editable, so it
+                # always comes from the authoritative job result, never the edited body.
+                "model_input": resolve_model_input(page.get("model_input"), fallback_page=page),
             }
         )
     return {
@@ -722,7 +863,7 @@ def normalize_annotation_block(block: Dict[str, Any], page_id: int) -> Dict[str,
         "updated_at": block.get("updated_at") or iso_now(),
         "updated_by": block.get("updated_by") or "",
         "weak_heading": bool(block.get("weak_heading", block.get("weakHeading", False))),
-        "level": block.get("level") if block.get("level") in {"H1", "H2", "H3"} else None,
+        "level": block.get("level") if block.get("level") in LEVELS else None,
     }
 
 
@@ -776,6 +917,9 @@ def save_second_annotation(job_id: str, body: Dict[str, Any], mode: str) -> Dict
         state["second_annotated_at"] = int(time.time())
         write_dataset_state(job_id, state)
     write_json_file(target, annotation)
+    # Re-emit the per-page training template with the same prompt inputs but the
+    # corrected (annotated) outputs.
+    write_training_jsonl(job_id, payload, blocks_by_page)
     return {"ok": True, "dataset_id": job_id, "path": str(target), "state": read_dataset_state(job_id, payload)}
 
 
@@ -805,7 +949,7 @@ def job_block_from_annotation(block: Dict[str, Any]) -> Dict[str, Any]:
         "page_id": block.get("page_id", 0),
         "block_type": label if label in BLOCK_TYPES else "text",
         "weak_heading": bool(block.get("weak_heading", False)),
-        "level": block.get("level") if block.get("level") in {"H1", "H2", "H3"} else None,
+        "level": block.get("level") if block.get("level") in LEVELS else None,
     }
 
 
@@ -916,14 +1060,21 @@ def run_convert_task(task_id: str, dataset_ids: List[str], target_format: str, m
         write_json_file(output_dir / "convert_config.json", config)
         log_text = "\n".join(logs) + f"\nskipped_samples={skipped}\n"
         if target_format == "swift":
+            train_file = split_files[0] if split_files else "train.jsonl"
             usage_note = (
-                "\nms-swift usage note:\n"
-                "  cd <converted_dataset_dir>\n"
-                "  export ROOT_IMAGE_DIR=$PWD\n"
-                "  swift sft --dataset train.jsonl\n"
-                "The images field uses paths relative to this converted dataset directory.\n"
+                "ms-swift 微调使用说明\n"
+                "====================\n"
+                "本数据集已是 ms-swift 标准 messages 多模态格式，可用 --dataset 直接加载，无需注册 dataset_info.json。\n"
+                "每条样本：messages=[system, user(含 <image>), assistant(目标 JSON)]，images 为相对本目录的图片路径。\n"
+                "\n"
+                "images 字段是相对路径，ms-swift 在运行时相对“当前工作目录(cwd)”解析，因此必须先 cd 进本目录再训练：\n"
+                f"  cd {output_dir.name}\n"
+                f"  swift sft --model <模型ID或本地路径> --dataset {train_file} --train_type lora\n"
+                "\n"
+                "若要在任意目录下运行，请改用绝对路径：可对 jsonl 内的 images 路径做前缀替换，或把本目录整体放到训练机后再 cd 进入。\n"
+                "（convert_config.json 与 dataset_info.json 仅为 Markhub 转换元数据，并非 ms-swift 的注册文件，训练时无需传入。）\n"
             )
-            log_text += usage_note
+            log_text += "\n" + usage_note
             (output_dir / "README_ms_swift.txt").write_text(sanitize_saved_text(usage_note), encoding="utf-8")
         (output_dir / "convert_log.txt").write_text(sanitize_saved_text(log_text), encoding="utf-8")
 
@@ -982,6 +1133,7 @@ def resolve_convert_output_dir(dataset_ids: List[str], target_format: str, merge
 def samples_from_annotation(dataset_id: str, payload: Dict[str, Any], annotation: Dict[str, Any], target_format: str, output_dir: Path) -> Tuple[List[Dict[str, Any]], int]:
     samples: List[Dict[str, Any]] = []
     skipped = 0
+    payload_pages = {int(p.get("page_id") or 0): p for p in payload.get("pages", []) if isinstance(p, dict)}
     for page in annotation.get("pages", []):
         try:
             if not isinstance(page, dict):
@@ -997,12 +1149,19 @@ def samples_from_annotation(dataset_id: str, payload: Dict[str, Any], annotation
             target_image = output_dir / "images" / safe_path_name(dataset_id) / f"page_{int(page.get('page_id') or 0):03d}.png"
             image_ref = prepare_portable_image_ref(source_image, target_image, output_dir)
             answer = json.dumps({"image_path": image_ref, "blocks": blocks, "context_before": "", "context_after": ""}, ensure_ascii=False, separators=(",", ":"))
+            # Use the exact prompt that was sent to the model for this page (the
+            # default training template), falling back to the job result then a
+            # reconstructed prompt for legacy datasets.
+            fallback = payload_pages.get(int(page.get("page_id") or 0)) or {}
+            model_input = resolve_model_input(page.get("model_input"), fallback.get("model_input"), fallback_page=page)
+            system_text = model_input["system"] or prompt_fragment("training", "system")
+            user_text = ensure_image_token(model_input["user"] or DEFAULT_SWIFT_USER_PROMPT)
             if target_format == "swift":
                 samples.append(
                     {
                         "messages": [
-                            {"role": "system", "content": "你是一个专业的文档版面分析模型。"},
-                            {"role": "user", "content": DEFAULT_SWIFT_USER_PROMPT},
+                            {"role": "system", "content": system_text},
+                            {"role": "user", "content": user_text},
                             {"role": "assistant", "content": answer},
                         ],
                         "images": [image_ref],
@@ -1011,9 +1170,10 @@ def samples_from_annotation(dataset_id: str, payload: Dict[str, Any], annotation
             else:
                 samples.append(
                     {
-                        "instruction": DEFAULT_LLAMAFACTORY_INSTRUCTION,
+                        "instruction": user_text,
                         "input": "",
                         "output": answer,
+                        "system": system_text,
                         "images": [image_ref],
                     }
                 )
@@ -1055,7 +1215,7 @@ def normalize_export_block(block: Dict[str, Any]) -> Dict[str, Any]:
         "page_id": int(block.get("page_id") or 0),
         "block_type": label,
         "weak_heading": bool(block.get("weak_heading", False)),
-        "level": block.get("level") if block.get("level") in {"H1", "H2", "H3"} else None,
+        "level": block.get("level") if block.get("level") in LEVELS else None,
     }
 
 
@@ -1080,7 +1240,7 @@ def write_dataset_info(output_dir: Path, target_format: str, split_files: List[s
         "columns": (
             {"messages": "messages", "images": "images"}
             if target_format == "swift"
-            else {"prompt": "instruction", "query": "input", "response": "output", "images": "images"}
+            else {"prompt": "instruction", "query": "input", "response": "output", "system": "system", "images": "images"}
         ),
     }
     write_json_file(output_dir / "dataset_info.json", info)
