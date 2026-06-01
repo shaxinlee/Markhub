@@ -1,6 +1,5 @@
 .DS_Store
 .review.md/
-start.sh
 
 # Local environment
 .env
