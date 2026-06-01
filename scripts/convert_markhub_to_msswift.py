@@ -30,7 +30,7 @@ DEFAULT_USER_PROMPT = """<image>
 - blocks 中每个对象必须包含 id、text、bbox、page_id、block_type、weak_heading、level。
 - bbox 使用 0-1000 相对坐标，格式为 [左上角x, 左上角y, 右下角x, 右下角y]。
 - block_type 只能使用 doc_title、paragraph_title、text、table_of_contents、table、formula、chart、figure_title、image、vision_footnote、header、footer、caption、handwriting、seal。
-- doc_title / paragraph_title 需要判断 level，可为 H1、H2、H3；其他类型 level 必须为 null。
+- 只有 paragraph_title 需要判断 level，可为 H1、H2、H3、H4；doc_title 和其他类型 level 必须为 null。
 - 必须逐类扫描页面：标题、正文、目录、表格、公式、图表、图片/流程图、caption、单位/资料来源、页眉页脚、手写字、印章。
 - table_of_contents 表示文档目录、目录页、带页码的章节索引、点线引导目录；table 表示行列结构；formula 表示数学/化学公式；chart 表示数据图表；header/footer 表示页眉页脚；caption 表示图表公式说明。
 - 不要把公式、图表、手写字、印章误标为 image 或 text；不要把 caption、单位说明、资料来源并入主体块。
@@ -150,7 +150,8 @@ def make_output_blocks(blocks: list[Any]) -> list[dict[str, Any]]:
                 block[key] = bool(raw_block.get("weak_heading"))
             elif key == "level":
                 level = raw_block.get("level")
-                block[key] = level if level in {"H1", "H2", "H3"} else None
+                block_type = raw_block.get("block_type")
+                block[key] = level if block_type == "paragraph_title" and level in {"H1", "H2", "H3", "H4"} else None
             elif key == "block_type":
                 block[key] = "table_of_contents" if raw_block.get(key) == "list" else str(raw_block.get(key) or "text")
             else:

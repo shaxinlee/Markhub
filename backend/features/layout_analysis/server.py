@@ -205,6 +205,8 @@ from .utils import (
     write_env_file,
 )
 
+from features.bounding_box import register as register_bounding_box
+
 load_dotenv()
 
 
@@ -268,7 +270,19 @@ class LayoutAnalyzerHandler(BaseHTTPRequestHandler):
             self.write_json({"jobs": list_job_summaries()})
             return
         if path == "/api/datasets":
-            self.write_json({"datasets": list_dataset_summaries()})
+            layout_datasets = list_dataset_summaries()
+            for ds in layout_datasets:
+                ds["annotation_type"] = "layout"
+            try:
+                from features.bounding_box.storage import list_bounding_box_datasets
+                bbox_datasets = list_bounding_box_datasets()
+                for ds in bbox_datasets:
+                    ds["annotation_type"] = "bounding_box"
+                all_datasets = layout_datasets + bbox_datasets
+                all_datasets.sort(key=lambda x: x.get("updated_at", 0) or x.get("created_at", ""), reverse=True)
+                self.write_json({"datasets": all_datasets})
+            except Exception:
+                self.write_json({"datasets": layout_datasets})
             return
         convert_match = re.fullmatch(r"/api/datasets/convert/([A-Za-z0-9_-]+)", path)
         if convert_match:
@@ -583,6 +597,7 @@ def main() -> int:
 
     ensure_dataset_storage()
     bootstrap_prompt_store()
+    register_bounding_box(LayoutAnalyzerHandler)
     server = ThreadingHTTPServer((args.host, args.port), LayoutAnalyzerHandler)
     print(f"Layout Analyzer running at http://{args.host}:{args.port}")
     print(f"LLM_BASE_URL={env_config()['base_url']}")

@@ -13,14 +13,16 @@ import Dashboard from './components/Dashboard';
 import DatasetsPage from './components/DatasetsPage';
 import Workspace from './components/Workspace';
 import SecondAnnotationWorkspace from './components/SecondAnnotationWorkspace';
+import BoundingBoxWorkspace from './components/BoundingBoxWorkspace';
 import PromptManagementPage from './components/PromptManagementPage';
 import SettingsPage from './components/SettingsPage';
 
 export default function App() {
-  const [activeScreen, setActiveScreen] = useState<'dashboard' | 'workspace' | 'secondAnnotation'>('dashboard');
+  const [activeScreen, setActiveScreen] = useState<'dashboard' | 'workspace' | 'secondAnnotation' | 'boundingBox'>('dashboard');
   const [activeHeaderTab, setActiveHeaderTab] = useState<AppTab>('projects');
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [selectedDatasetId, setSelectedDatasetId] = useState<string | null>(null);
+  const [boundingBoxDatasetId, setBoundingBoxDatasetId] = useState<string | null>(null);
   const [language, setLanguage] = useState<'zh-CN'>('zh-CN');
 
   const [jobs, setJobs] = useState<BackendJobSummary[]>([]);
@@ -49,8 +51,13 @@ export default function App() {
 
   const loadRealDatasets = async () => {
     try {
-      const backendJobs = await fetchDatasetSummaries();
-      const realProjects = backendJobs.map(mapJobToProject);
+      const [layoutJobs, bboxJobs] = await Promise.all([
+        fetchDatasetSummaries(),
+        fetchBoundingBoxSummaries(),
+      ]);
+      const backendJobs = [...layoutJobs, ...bboxJobs];
+      // Only layout datasets map to projects (bounding-box datasets open their own workspace).
+      const realProjects = layoutJobs.map(mapJobToProject);
       setJobs(backendJobs);
       setProjects(realProjects);
       setStats({
@@ -87,11 +94,38 @@ export default function App() {
     }
   };
 
+  const fetchBoundingBoxSummaries = async (): Promise<BackendJobSummary[]> => {
+    try {
+      const response = await fetch('/api/bounding-box/datasets', { cache: 'no-store' });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload.error) throw new Error(payload.error || `HTTP ${response.status}`);
+      const datasets: Array<Record<string, any>> = payload.datasets || [];
+      return datasets.map((ds) => ({
+        dataset_id: ds.id,
+        job_id: ds.id,
+        filename: ds.name || ds.id,
+        status: 'complete',
+        page_count: ds.image_count || 0,
+        completed_pages: ds.image_count || 0,
+        block_count: ds.annotated_count || 0,
+        updated_at: ds.updated_at ? Math.floor(Date.parse(ds.updated_at) / 1000) : 0,
+        annotation_type: 'bounding_box',
+        annotation_status: 'none',
+        convert_status: 'none',
+        converted_formats: [],
+      } as BackendJobSummary));
+    } catch (error) {
+      console.warn('Failed to load bounding-box datasets:', error);
+      return [];
+    }
+  };
+
   const handleNavigate = (tab: AppTab) => {
     setActiveHeaderTab(tab);
     setActiveScreen('dashboard');
     setSelectedProject(null);
     setSelectedDatasetId(null);
+    setBoundingBoxDatasetId(null);
   };
 
   const handleCreateProject = (newProj: Omit<Project, 'id' | 'images'>) => {
@@ -110,6 +144,10 @@ export default function App() {
   };
 
   const handleOpenAnnotationFeature = (feature: AnnotationFeature) => {
+    if (feature === 'bounding_box') {
+      handleCreateBoundingBoxDataset();
+      return;
+    }
     if (feature !== 'layout') {
       alert('该标注功能未上线');
       return;
@@ -117,6 +155,26 @@ export default function App() {
     const targetProject = projects[0] || createLayoutDraftProject();
     setSelectedProject(targetProject);
     setActiveScreen('workspace');
+  };
+
+  const handleCreateBoundingBoxDataset = async () => {
+    const name = `目标框标注_${new Date().toLocaleDateString('zh-CN')}`;
+    try {
+      const response = await fetch('/api/bounding-box/datasets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, description: '新建目标框标注数据集' }),
+      });
+      const data = await response.json();
+      if (!response.ok || data.error) {
+        alert(data.error || '创建数据集失败');
+        return;
+      }
+      setBoundingBoxDatasetId(data.id);
+      setActiveScreen('boundingBox');
+    } catch (error) {
+      alert('创建数据集失败，请检查后端服务是否正常运行');
+    }
   };
 
   const handleOpenDataset = (jobId: string) => {
@@ -134,6 +192,11 @@ export default function App() {
   const handleOpenSecondAnnotation = (datasetId: string) => {
     setSelectedDatasetId(datasetId);
     setActiveScreen('secondAnnotation');
+  };
+
+  const handleOpenBoundingBoxDataset = (datasetId: string) => {
+    setBoundingBoxDatasetId(datasetId);
+    setActiveScreen('boundingBox');
   };
 
   const handleUpdateProjectProgress = (id: string, progress: number) => {
@@ -161,6 +224,7 @@ export default function App() {
                 jobs={jobs}
                 onCreateDataset={handleOpenAnnotationFeature}
                 onOpenDataset={handleOpenDataset}
+                onOpenBoundingBoxDataset={handleOpenBoundingBoxDataset}
                 onSecondAnnotate={handleOpenSecondAnnotation}
                 onRefreshDatasets={loadRealDatasets}
               />
@@ -230,6 +294,23 @@ export default function App() {
               setActiveScreen('dashboard');
               setSelectedDatasetId(null);
               loadRealDatasets();
+            }}
+          />
+        </motion.div>
+      ) : activeScreen === 'boundingBox' && boundingBoxDatasetId ? (
+        <motion.div
+          key="bounding-box-view"
+          initial={{ opacity: 0, filter: 'blur(3px)' }}
+          animate={{ opacity: 1, filter: 'blur(0px)' }}
+          exit={{ opacity: 0, filter: 'blur(3px)' }}
+          transition={{ duration: 0.2 }}
+          className="flex h-screen w-full overflow-hidden"
+        >
+          <BoundingBoxWorkspace
+            datasetId={boundingBoxDatasetId}
+            onGoBack={() => {
+              setActiveScreen('dashboard');
+              setBoundingBoxDatasetId(null);
             }}
           />
         </motion.div>

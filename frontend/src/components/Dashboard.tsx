@@ -43,7 +43,7 @@ const ANNOTATION_FEATURES: Array<{
   icon: React.ReactNode;
 }> = [
   { id: 'layout', label: '版面分析标注', description: 'PDF 页面渲染、版面块识别、人工修正。', status: 'online', icon: <Grid3X3 className="h-4 w-4" /> },
-  { id: 'bounding_box', label: '目标框标注', description: '通用矩形框标注能力。', status: 'coming_soon', icon: <Square className="h-4 w-4" /> },
+  { id: 'bounding_box', label: '目标框标注', description: '通用矩形框标注能力，支持拖拽画框、标签管理、批量上传。', status: 'online', icon: <Square className="h-4 w-4" /> },
   { id: 'polygon', label: '多边形分割', description: '复杂区域轮廓标注。', status: 'coming_soon', icon: <Spline className="h-4 w-4" /> },
   { id: 'keypoints', label: '关键点标注', description: '结构点位和姿态类任务。', status: 'coming_soon', icon: <Crosshair className="h-4 w-4" /> },
   { id: 'text_transcription', label: '文本转录', description: '图片文字转写和校验。', status: 'coming_soon', icon: <FileEdit className="h-4 w-4" /> },

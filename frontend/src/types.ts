@@ -45,6 +45,7 @@ export interface BackendJobSummary {
   converted_formats?: string[];
   first_annotated_at?: number | null;
   second_annotated_at?: number | null;
+  annotation_type?: 'layout' | 'bounding_box';
   last_convert_record?: {
     task_id?: string;
     target_format?: string;
@@ -221,4 +222,60 @@ export interface AnnotationStats {
   totalImages: number;
   totalAnnotations: string; // e.g., "3.1M"
   activeCollaborators: number;
+}
+
+export interface BoundingBoxLabel {
+  id: string;
+  name: string;
+  color: string;
+  description?: string;
+}
+
+export interface BoundingBoxAnnotation {
+  id: string;
+  image_id: string;
+  label_id: string;
+  label_name: string;
+  bbox: [number, number, number, number]; // [x1, y1, x2, y2] in percentage (0 to 100)
+  confidence?: number;
+  notes?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BoundingBoxImage {
+  id: string;
+  dataset_id: string;
+  filename: string;
+  image_url: string;
+  width: number;
+  height: number;
+  annotation_count: number;
+  status: 'pending' | 'annotated' | 'reviewed';
+  created_at: string;
+}
+
+export interface BoundingBoxDataset {
+  id: string;
+  name: string;
+  description?: string;
+  image_count: number;
+  annotated_count: number;
+  label_count: number;
+  status: 'active' | 'archived' | 'completed';
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BoundingBoxJob {
+  dataset_id: string;
+  dataset_name: string;
+  status: 'draft' | 'annotating' | 'completed' | 'failed';
+  image_count: number;
+  annotated_count: number;
+  labels: BoundingBoxLabel[];
+  images: BoundingBoxImage[];
+  annotations: Record<string, BoundingBoxAnnotation[]>;
+  created_at: string;
+  updated_at: string;
 }

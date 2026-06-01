@@ -31,9 +31,10 @@ from .schemas import (
     PageImage,
     PromptTemplate,
     VisionResizeConfig,
+    DEFAULT_PROMPT_TEMPLATE_ID,
 )
 from .paths import LLAMAFACTORY_DATASETS_DIR, SWIFT_DATASETS_DIR
-from .prompts import prompt_fragment
+from .prompts import LAYOUT_PROMPT, prompt_fragment
 from .storage import (
     annotation_file_for,
     clean_old_jobs,
@@ -160,16 +161,15 @@ def build_heading_context(prior_blocks: List[Dict[str, Any]], recent_limit: int 
     """Build a compact heading outline from already-analyzed pages.
 
     Per-page level detection is unreliable when a page contains only a few
-    headings, so we feed the model a running outline of prior headings to keep
-    levels consistent across pages. To avoid bloating the prompt we include only
-    two things: the active ancestor path (breadcrumb of the last heading) and the
-    most recent N headings, capped at ``max_entries`` total.
+    paragraph titles, so we feed the model a running outline of prior
+    paragraph_title blocks to keep levels consistent across pages. Other block
+    types, including doc_title, never participate in the hierarchy context.
     """
     headings = [
         b
         for b in prior_blocks
         if isinstance(b, dict)
-        and b.get("block_type") in {"doc_title", "paragraph_title"}
+        and b.get("block_type") == "paragraph_title"
         and b.get("level") in LEVELS
     ]
     if not headings:
@@ -370,13 +370,17 @@ def normalize_qwen_bbox(value: Any) -> Optional[List[int]]:
 
 
 def normalize_heading_level(level: Any, block_type: str, text: str) -> Optional[str]:
-    if block_type == "doc_title":
-        return "H1"
     if block_type != "paragraph_title":
         return None
     if level in LEVELS:
         return str(level)
     return infer_heading_level(text)
+
+
+def normalize_stored_heading_level(level: Any, block_type: str) -> Optional[str]:
+    if block_type == "paragraph_title" and level in LEVELS:
+        return str(level)
+    return None
 
 
 def infer_heading_level(text: str) -> Optional[str]:
@@ -609,7 +613,13 @@ def collect_done_blocks(pages: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]
     blocks: List[Dict[str, Any]] = []
     for page in pages:
         if isinstance(page.get("blocks"), list):
-            blocks.extend(page["blocks"])
+            for block in page["blocks"]:
+                if not isinstance(block, dict):
+                    continue
+                block_type = normalize_block_type(block.get("block_type") or block.get("label") or block.get("type"), "text")
+                normalized = dict(block)
+                normalized["level"] = normalize_stored_heading_level(block.get("level"), block_type)
+                blocks.append(normalized)
     def sort_key(block: Dict[str, Any]) -> Tuple[int, int, int]:
         bbox = block.get("bbox")
         if not isinstance(bbox, list) or len(bbox) < 2:
@@ -652,12 +662,40 @@ def training_jsonl_path(job_id: str) -> Path:
     return find_job_dir(job_id) / "training_samples.jsonl"
 
 
-def build_training_lines(payload: Dict[str, Any], blocks_by_page: Optional[Dict[int, List[Dict[str, Any]]]] = None) -> List[Dict[str, Any]]:
+def prompt_template_id_from_payload(payload: Dict[str, Any]) -> str:
+    template = payload.get("prompt_template")
+    if isinstance(template, dict):
+        return str(template.get("id") or "")
+    return ""
+
+
+def training_prompt_user_from_page(page: Dict[str, Any], heading_context: str = "") -> str:
+    width = int(page.get("model_width") or page.get("width") or 0)
+    height = int(page.get("model_height") or page.get("height") or 0)
+    user = prompt_fragment("page_user_text").format(page_id=int(page.get("page_id") or 0), width=width, height=height)
+    if heading_context:
+        user += "\n\n" + heading_context
+    return user
+
+
+def training_prompt_system_from_page(payload: Dict[str, Any], page: Dict[str, Any], refresh_builtin_system_prompt: bool = False) -> str:
+    if refresh_builtin_system_prompt and prompt_template_id_from_payload(payload) == DEFAULT_PROMPT_TEMPLATE_ID:
+        return LAYOUT_PROMPT
+    return resolve_model_input(page.get("model_input"), fallback_page=page)["system"]
+
+
+def build_training_lines(
+    payload: Dict[str, Any],
+    blocks_by_page: Optional[Dict[int, List[Dict[str, Any]]]] = None,
+    repair_prompt_context: bool = False,
+    refresh_builtin_system_prompt: bool = False,
+) -> List[Dict[str, Any]]:
     """One entry per page: the exact prompt sent to the model (structured
     ``system`` / ``user``) plus the page blocks as the target output. This is the
     format-agnostic default training template; the swift / llamafactory exporters
     convert from the same per-page prompt into their respective layouts."""
     lines: List[Dict[str, Any]] = []
+    prior_blocks: List[Dict[str, Any]] = []
     for page in payload.get("pages", []):
         if not isinstance(page, dict):
             continue
@@ -665,25 +703,48 @@ def build_training_lines(payload: Dict[str, Any], blocks_by_page: Optional[Dict[
         raw_blocks = blocks_by_page.get(page_id, []) if blocks_by_page is not None else page.get("blocks", [])
         blocks = [normalize_export_block(block) for block in (raw_blocks or []) if isinstance(block, dict)]
         model_input = resolve_model_input(page.get("model_input"), fallback_page=page)
+        user_text = model_input["user"]
+        if repair_prompt_context:
+            user_text = training_prompt_user_from_page(page, build_heading_context(prior_blocks))
         lines.append(
             {
                 "page_id": page_id,
                 "image": str(page.get("image_url") or ""),
-                "input": {"system": model_input["system"], "user": model_input["user"]},
+                "input": {
+                    "system": training_prompt_system_from_page(payload, page, refresh_builtin_system_prompt),
+                    "user": user_text,
+                },
                 "output": {"blocks": blocks, "context_before": "", "context_after": ""},
             }
         )
+        prior_blocks.extend(blocks)
     return lines
 
 
-def write_training_jsonl(job_id: str, payload: Dict[str, Any], blocks_by_page: Optional[Dict[int, List[Dict[str, Any]]]] = None) -> Path:
+def write_training_jsonl(
+    job_id: str,
+    payload: Dict[str, Any],
+    blocks_by_page: Optional[Dict[int, List[Dict[str, Any]]]] = None,
+    repair_prompt_context: bool = False,
+    refresh_builtin_system_prompt: bool = False,
+) -> Path:
     """Persist the per-page default training template (one JSON object per line)."""
     path = training_jsonl_path(job_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as handle:
-        for line in build_training_lines(payload, blocks_by_page):
+        for line in build_training_lines(payload, blocks_by_page, repair_prompt_context, refresh_builtin_system_prompt):
             handle.write(sanitize_saved_text(json.dumps(line, ensure_ascii=False)) + "\n")
     return path
+
+
+def repair_training_samples_from_annotations(job_id: str, payload: Dict[str, Any], blocks_by_page: Dict[int, List[Dict[str, Any]]]) -> Path:
+    return write_training_jsonl(
+        job_id,
+        payload,
+        blocks_by_page,
+        repair_prompt_context=True,
+        refresh_builtin_system_prompt=True,
+    )
 
 
 # --------------------------------------------------------------------------
@@ -695,8 +756,9 @@ def delete_dataset(job_id: str) -> Dict[str, Any]:
     job_dir = find_job_dir(resolved_job_id).resolve()
     if not any(str(job_dir).startswith(str(root.resolve())) for root in job_storage_roots()) or not job_dir.is_dir():
         raise FileNotFoundError(f"dataset not found: {job_id}")
+    # Delete only the selected dataset's own directory. Second-annotation files
+    # are intentionally left untouched — deletion is not cascaded.
     shutil.rmtree(job_dir)
-    shutil.rmtree(second_annotation_dir(resolved_job_id), ignore_errors=True)
     return {"dataset_id": resolved_job_id, "deleted": True}
 
 
@@ -863,7 +925,7 @@ def normalize_annotation_block(block: Dict[str, Any], page_id: int) -> Dict[str,
         "updated_at": block.get("updated_at") or iso_now(),
         "updated_by": block.get("updated_by") or "",
         "weak_heading": bool(block.get("weak_heading", block.get("weakHeading", False))),
-        "level": block.get("level") if block.get("level") in LEVELS else None,
+        "level": normalize_stored_heading_level(block.get("level"), label),
     }
 
 
@@ -917,9 +979,9 @@ def save_second_annotation(job_id: str, body: Dict[str, Any], mode: str) -> Dict
         state["second_annotated_at"] = int(time.time())
         write_dataset_state(job_id, state)
     write_json_file(target, annotation)
-    # Re-emit the per-page training template with the same prompt inputs but the
-    # corrected (annotated) outputs.
-    write_training_jsonl(job_id, payload, blocks_by_page)
+    # Re-emit the per-page training template from corrected annotations. The
+    # prompt context must follow the edited paragraph_title hierarchy too.
+    repair_training_samples_from_annotations(job_id, payload, blocks_by_page)
     return {"ok": True, "dataset_id": job_id, "path": str(target), "state": read_dataset_state(job_id, payload)}
 
 
@@ -942,14 +1004,15 @@ def overwrite_job_blocks(job_id: str, payload: Dict[str, Any], annotation: Dict[
 
 def job_block_from_annotation(block: Dict[str, Any]) -> Dict[str, Any]:
     label = normalize_block_type(block.get("label") or block.get("block_type"), "text")
+    block_type = label if label in BLOCK_TYPES else "text"
     return {
         "id": block.get("id"),
         "text": block.get("text", ""),
         "bbox": block.get("bbox", [0, 0, 1, 1]),
         "page_id": block.get("page_id", 0),
-        "block_type": label if label in BLOCK_TYPES else "text",
+        "block_type": block_type,
         "weak_heading": bool(block.get("weak_heading", False)),
-        "level": block.get("level") if block.get("level") in LEVELS else None,
+        "level": normalize_stored_heading_level(block.get("level"), block_type),
     }
 
 
@@ -1215,7 +1278,7 @@ def normalize_export_block(block: Dict[str, Any]) -> Dict[str, Any]:
         "page_id": int(block.get("page_id") or 0),
         "block_type": label,
         "weak_heading": bool(block.get("weak_heading", False)),
-        "level": block.get("level") if block.get("level") in LEVELS else None,
+        "level": normalize_stored_heading_level(block.get("level"), label),
     }
 
 

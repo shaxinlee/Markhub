@@ -1,0 +1,189 @@
+{
+  "min_gt_coverage": 0.8,
+  "min_iou": 0.0,
+  "overall_accuracy": 0.9383259911894273,
+  "total_gt": 1135,
+  "total_matched": 1121,
+  "total_correct": 1065,
+  "missing": 14,
+  "extra": 45,
+  "per_label": {
+    "caption": {
+      "support": 7,
+      "correct": 7,
+      "predicted": 7,
+      "recall": 1.0,
+      "precision": 1.0,
+      "f1": 1.0
+    },
+    "doc_title": {
+      "support": 12,
+      "correct": 12,
+      "predicted": 14,
+      "recall": 1.0,
+      "precision": 0.8571428571428571,
+      "f1": 0.923076923076923
+    },
+    "figure_title": {
+      "support": 21,
+      "correct": 19,
+      "predicted": 19,
+      "recall": 0.9047619047619048,
+      "precision": 1.0,
+      "f1": 0.9500000000000001
+    },
+    "footer": {
+      "support": 92,
+      "correct": 92,
+      "predicted": 96,
+      "recall": 1.0,
+      "precision": 0.9583333333333334,
+      "f1": 0.9787234042553191
+    },
+    "handwriting": {
+      "support": 26,
+      "correct": 25,
+      "predicted": 28,
+      "recall": 0.9615384615384616,
+      "precision": 0.8928571428571429,
+      "f1": 0.9259259259259259
+    },
+    "header": {
+      "support": 92,
+      "correct": 92,
+      "predicted": 92,
+      "recall": 1.0,
+      "precision": 1.0,
+      "f1": 1.0
+    },
+    "image": {
+      "support": 21,
+      "correct": 17,
+      "predicted": 17,
+      "recall": 0.8095238095238095,
+      "precision": 1.0,
+      "f1": 0.8947368421052632
+    },
+    "paragraph_title": {
+      "support": 247,
+      "correct": 222,
+      "predicted": 260,
+      "recall": 0.8987854251012146,
+      "precision": 0.8538461538461538,
+      "f1": 0.8757396449704142
+    },
+    "seal": {
+      "support": 13,
+      "correct": 8,
+      "predicted": 18,
+      "recall": 0.6153846153846154,
+      "precision": 0.4444444444444444,
+      "f1": 0.5161290322580646
+    },
+    "table": {
+      "support": 31,
+      "correct": 31,
+      "predicted": 31,
+      "recall": 1.0,
+      "precision": 1.0,
+      "f1": 1.0
+    },
+    "table_of_contents": {
+      "support": 2,
+      "correct": 2,
+      "predicted": 2,
+      "recall": 1.0,
+      "precision": 1.0,
+      "f1": 1.0
+    },
+    "text": {
+      "support": 565,
+      "correct": 532,
+      "predicted": 576,
+      "recall": 0.9415929203539823,
+      "precision": 0.9236111111111112,
+      "f1": 0.9325153374233129
+    },
+    "vision_footnote": {
+      "support": 6,
+      "correct": 6,
+      "predicted": 6,
+      "recall": 1.0,
+      "precision": 1.0,
+      "f1": 1.0
+    }
+  },
+  "paragraph_title_by_level": {
+    "H1": {
+      "support": 77,
+      "correct": 75,
+      "predicted": 78,
+      "recall": 0.974025974025974,
+      "precision": 0.9615384615384616,
+      "f1": 0.967741935483871
+    },
+    "H2": {
+      "support": 77,
+      "correct": 49,
+      "predicted": 55,
+      "recall": 0.6363636363636364,
+      "precision": 0.8909090909090909,
+      "f1": 0.7424242424242423
+    },
+    "H3": {
+      "support": 40,
+      "correct": 27,
+      "predicted": 64,
+      "recall": 0.675,
+      "precision": 0.421875,
+      "f1": 0.5192307692307693
+    },
+    "H4": {
+      "support": 53,
+      "correct": 37,
+      "predicted": 63,
+      "recall": 0.6981132075471698,
+      "precision": 0.5873015873015873,
+      "f1": 0.6379310344827586
+    }
+  },
+  "job_rows": [
+    {
+      "job_id": "3658d83afe24",
+      "gt": 359,
+      "matched": 353,
+      "correct": 332,
+      "recall": 0.924791086350975,
+      "missing": 6,
+      "extra": 5
+    },
+    {
+      "job_id": "cf3c6d8d4a48",
+      "gt": 176,
+      "matched": 175,
+      "correct": 175,
+      "recall": 0.9943181818181818,
+      "missing": 1,
+      "extra": 3
+    },
+    {
+      "job_id": "e18783403e50",
+      "gt": 131,
+      "matched": 131,
+      "correct": 130,
+      "recall": 0.9923664122137404,
+      "missing": 0,
+      "extra": 2
+    },
+    {
+      "job_id": "fcd5026a8cb2",
+      "gt": 469,
+      "matched": 462,
+      "correct": 428,
+      "recall": 0.9125799573560768,
+      "missing": 7,
+      "extra": 35
+    }
+  ],
+  "skipped": []
+}

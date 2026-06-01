@@ -25,11 +25,12 @@ interface DatasetsPageProps {
   jobs: BackendJobSummary[];
   onCreateDataset: (feature: AnnotationFeature) => void;
   onOpenDataset: (jobId: string) => void;
+  onOpenBoundingBoxDataset: (datasetId: string) => void;
   onSecondAnnotate: (datasetId: string) => void;
   onRefreshDatasets: () => void;
 }
 
-type DatasetCategory = 'All' | '已二次标注' | 'ms-swift' | 'Completed' | 'Running' | 'Error';
+type DatasetCategory = 'All' | 'PDF Layout' | 'Bounding Box' | '已二次标注' | 'ms-swift' | 'Completed' | 'Running' | 'Error';
 type DatasetStatus = 'Completed' | 'Running' | 'Error';
 type TargetFormat = 'llamafactory' | 'swift';
 type SplitType = 'train' | 'val' | 'test' | 'all';
@@ -37,7 +38,7 @@ type SplitType = 'train' | 'val' | 'test' | 'all';
 interface DatasetItem {
   id: string;
   name: string;
-  category: 'PDF Layout';
+  category: 'PDF Layout' | 'Bounding Box';
   amount: string;
   amountLabel: string;
   status: DatasetStatus;
@@ -50,6 +51,7 @@ interface DatasetItem {
   model: string;
   templateName?: string;
   annotationStatus: BackendJobSummary['annotation_status'];
+  annotationType: 'layout' | 'bounding_box';
   convertStatus: BackendJobSummary['convert_status'];
   convertError?: string;
   convertedFormats: string[];
@@ -74,8 +76,8 @@ const DATASET_TYPE_OPTIONS: Array<{
   {
     id: 'bounding_box',
     label: '目标框标注',
-    description: '待开发',
-    status: 'pending',
+    description: '上传图片后进行目标检测框标注，支持拖拽画框、标签管理和批量操作。',
+    status: 'available',
   },
   {
     id: 'polygon',
@@ -97,7 +99,7 @@ const DATASET_TYPE_OPTIONS: Array<{
   },
 ];
 
-export default function DatasetsPage({ jobs, onCreateDataset, onOpenDataset, onSecondAnnotate, onRefreshDatasets }: DatasetsPageProps) {
+export default function DatasetsPage({ jobs, onCreateDataset, onOpenDataset, onOpenBoundingBoxDataset, onSecondAnnotate, onRefreshDatasets }: DatasetsPageProps) {
   const [activeCategory, setActiveCategory] = useState<DatasetCategory>('All');
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'All' | DatasetStatus>('All');
@@ -123,6 +125,8 @@ export default function DatasetsPage({ jobs, onCreateDataset, onOpenDataset, onS
     return datasets.filter((dataset) => {
       const matchesCategory =
         activeCategory === 'All'
+        || (activeCategory === 'PDF Layout' && dataset.annotationType === 'layout')
+        || (activeCategory === 'Bounding Box' && dataset.annotationType === 'bounding_box')
         || (activeCategory === '已二次标注' && dataset.annotationStatus === 'second_annotated')
         || (activeCategory === 'ms-swift' && hasSwiftConversion(dataset))
         || dataset.status === activeCategory;
@@ -142,7 +146,7 @@ export default function DatasetsPage({ jobs, onCreateDataset, onOpenDataset, onS
       setConvertError('请先选择要删除的数据集。');
       return;
     }
-    if (!window.confirm(`确认删除已选择的 ${selectedIds.length} 个数据集吗？该操作会删除数据集和二次标注文件。`)) return;
+    if (!window.confirm(`确认删除已选择的 ${selectedIds.length} 个数据集吗？仅删除所选数据集，该操作不可恢复。`)) return;
     await deleteDatasets({ dataset_ids: selectedIds });
   }
 
@@ -151,7 +155,7 @@ export default function DatasetsPage({ jobs, onCreateDataset, onOpenDataset, onS
       setConvertError('当前没有可删除的数据集。');
       return;
     }
-    if (!window.confirm(`确认删除全部 ${datasets.length} 个数据集吗？该操作会清空当前数据集列表和二次标注文件。`)) return;
+    if (!window.confirm(`确认删除全部 ${datasets.length} 个数据集吗？该操作不可恢复。`)) return;
     await deleteDatasets({ delete_all: true });
   }
 
@@ -159,18 +163,48 @@ export default function DatasetsPage({ jobs, onCreateDataset, onOpenDataset, onS
     try {
       setConvertError('');
       setConvertMessage('正在删除数据集...');
-      const response = await fetch('/api/datasets/delete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok || result.error) throw new Error(result.error || `HTTP ${response.status}`);
+
+      // Each row may be a layout-analysis dataset or a bounding-box dataset; they
+      // live in different backends, so route deletes by type instead of sending
+      // every id to the layout endpoint (which 404s on bounding-box ids).
+      const targets = payload.delete_all
+        ? datasets
+        : datasets.filter((dataset) => (payload.dataset_ids || []).includes(dataset.id));
+      const layoutIds = targets.filter((d) => d.annotationType !== 'bounding_box').map((d) => d.id);
+      const bboxIds = targets.filter((d) => d.annotationType === 'bounding_box').map((d) => d.id);
+
+      let deleted = 0;
+      const failed: Array<{ dataset_id: string; error: string }> = [];
+
+      if (layoutIds.length > 0) {
+        const response = await fetch('/api/datasets/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ dataset_ids: layoutIds }),
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok || result.error) throw new Error(result.error || `HTTP ${response.status}`);
+        deleted += result.count || 0;
+        if (Array.isArray(result.failed)) failed.push(...result.failed);
+      }
+
+      for (const id of bboxIds) {
+        try {
+          const response = await fetch(`/api/bounding-box/datasets/${id}`, { method: 'DELETE' });
+          const result = await response.json().catch(() => ({}));
+          if (!response.ok || result.error) throw new Error(result.error || `HTTP ${response.status}`);
+          deleted += 1;
+        } catch (err) {
+          failed.push({ dataset_id: id, error: err instanceof Error ? err.message : String(err) });
+        }
+      }
+
       setSelectedIds([]);
-      setConvertMessage(`已删除 ${result.count || 0} 个数据集${result.failed?.length ? `，失败 ${result.failed.length} 个：${result.failed.map((item: { dataset_id: string; error: string }) => `${item.dataset_id} ${item.error}`).join('；')}` : ''}`);
+      setConvertMessage(`已删除 ${deleted} 个数据集${failed.length ? `，失败 ${failed.length} 个：${failed.map((item) => `${item.dataset_id} ${item.error}`).join('；')}` : ''}`);
       onRefreshDatasets();
     } catch (error) {
       setConvertError(error instanceof Error ? error.message : String(error));
+      setConvertMessage('');
     }
   }
 
@@ -302,17 +336,26 @@ export default function DatasetsPage({ jobs, onCreateDataset, onOpenDataset, onS
 
               <div className="relative z-10 mb-8 flex flex-col items-center justify-between gap-4 border-b border-surface-variant pb-4 md:flex-row">
                 <div className="flex w-full gap-6 overflow-x-auto md:w-auto">
-                  {(['All', '已二次标注', 'ms-swift', 'Completed', 'Running', 'Error'] as DatasetCategory[]).map((category) => (
+                  {([
+                    { id: 'All', label: '全部' },
+                    { id: 'PDF Layout', label: '版面分析' },
+                    { id: 'Bounding Box', label: '目标框' },
+                    { id: '已二次标注', label: '已二次标注' },
+                    { id: 'ms-swift', label: 'ms-swift' },
+                    { id: 'Completed', label: '已完成' },
+                    { id: 'Running', label: '进行中' },
+                    { id: 'Error', label: '失败' },
+                  ] as Array<{ id: DatasetCategory; label: string }>).map(({ id, label }) => (
                     <button
-                      key={category}
-                      onClick={() => setActiveCategory(category)}
+                      key={id}
+                      onClick={() => setActiveCategory(id)}
                       className={`whitespace-nowrap pb-2 text-label-md font-medium transition-colors ${
-                        activeCategory === category
+                        activeCategory === id
                           ? 'border-b-2 border-primary font-bold text-primary'
                           : 'text-on-surface-variant hover:text-primary'
                       }`}
                     >
-                      {category}
+                      {label}
                     </button>
                   ))}
                 </div>
@@ -381,7 +424,13 @@ export default function DatasetsPage({ jobs, onCreateDataset, onOpenDataset, onS
                         dataset={dataset}
                         selected={selectedIds.includes(dataset.id)}
                         onToggleSelected={() => toggleSelection(dataset)}
-                        onOpen={() => onOpenDataset(dataset.id)}
+                        onOpen={() => {
+                          if (dataset.annotationType === 'bounding_box') {
+                            onOpenBoundingBoxDataset(dataset.id);
+                          } else {
+                            onOpenDataset(dataset.id);
+                          }
+                        }}
                         onSecondAnnotate={() => onSecondAnnotate(dataset.id)}
                         onConvert={() => {
                           if (!isConvertible(dataset)) {
@@ -687,11 +736,13 @@ function mapJobToDataset(job: BackendJobSummary): DatasetItem {
   const status = normalizeStatus(job.status);
   const datasetId = job.dataset_id || job.job_id;
   const annotationStatus = normalizeAnnotationStatus(job.annotation_status, status);
+  const annotationType = job.annotation_type || 'layout';
+  const category = annotationType === 'bounding_box' ? 'Bounding Box' : 'PDF Layout';
 
   return {
     id: datasetId,
     name: job.filename || `Dataset ${datasetId}`,
-    category: 'PDF Layout',
+    category,
     amount: formatCount(job.page_count || 0),
     amountLabel: (job.page_count || 0) === 1 ? 'page' : 'pages',
     status,
@@ -704,6 +755,7 @@ function mapJobToDataset(job: BackendJobSummary): DatasetItem {
     model: job.model || 'Unknown model',
     templateName: job.prompt_template?.name,
     annotationStatus,
+    annotationType,
     convertStatus: job.convert_status || 'none',
     convertError: job.convert_error,
     convertedFormats: job.converted_formats || [],

@@ -53,7 +53,7 @@ RESIZE_PRESETS = {
 }
 
 DEFAULT_PROMPT_TEMPLATE_ID = "default_template_1"
-BUILTIN_LAYOUT_PROMPT_REVISION = "layout_prompt_v20260530_h4_levels"
+BUILTIN_LAYOUT_PROMPT_REVISION = "layout_prompt_v20260601_paragraph_title_levels_only"
 PROMPT_TEMPLATE_CATEGORIES = {"bounding_box", "polygon", "layout", "keypoints", "text_transcription"}
 PROMPT_TYPES = {
     "data_annotation",
