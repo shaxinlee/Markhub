@@ -1202,20 +1202,28 @@ def samples_from_annotation(dataset_id: str, payload: Dict[str, Any], annotation
             if not isinstance(page, dict):
                 skipped += 1
                 continue
-            blocks = [normalize_export_block(block) for block in page.get("blocks", []) if isinstance(block, dict)]
+            fallback = payload_pages.get(int(page.get("page_id") or 0)) or {}
+            source_image, uses_model_page = export_image_source(dataset_id, page, fallback, target_format)
+            if not source_image or not source_image.is_file():
+                raise FileNotFoundError(f"image not found for page {page.get('page_id')}")
+            blocks = [
+                normalize_export_block(
+                    block,
+                    bbox_override=normalize_export_bbox_1000(block, page, fallback, uses_model_page) if target_format == "swift" else None,
+                )
+                for block in page.get("blocks", [])
+                if isinstance(block, dict)
+            ]
             if not blocks:
                 skipped += 1
                 continue
-            source_image = image_path_from_page_url(dataset_id, str(page.get("image_url") or ""))
-            if not source_image or not source_image.is_file():
-                raise FileNotFoundError(f"image not found for page {page.get('page_id')}")
             target_image = output_dir / "images" / safe_path_name(dataset_id) / f"page_{int(page.get('page_id') or 0):03d}.png"
-            image_ref = prepare_portable_image_ref(source_image, target_image, output_dir)
+            target_size = export_image_target_size(page, fallback) if target_format == "swift" and not uses_model_page else None
+            image_ref = prepare_portable_image_ref(source_image, target_image, output_dir, target_size=target_size)
             answer = json.dumps({"image_path": image_ref, "blocks": blocks, "context_before": "", "context_after": ""}, ensure_ascii=False, separators=(",", ":"))
             # Use the exact prompt that was sent to the model for this page (the
             # default training template), falling back to the job result then a
             # reconstructed prompt for legacy datasets.
-            fallback = payload_pages.get(int(page.get("page_id") or 0)) or {}
             model_input = resolve_model_input(page.get("model_input"), fallback.get("model_input"), fallback_page=page)
             system_text = model_input["system"] or prompt_fragment("training", "system")
             user_text = ensure_image_token(model_input["user"] or DEFAULT_SWIFT_USER_PROMPT)
@@ -1245,7 +1253,32 @@ def samples_from_annotation(dataset_id: str, payload: Dict[str, Any], annotation
     return samples, skipped
 
 
-def prepare_portable_image_ref(source_image: Path, target_image: Path, output_dir: Path) -> str:
+def export_image_source(dataset_id: str, page: Dict[str, Any], fallback: Dict[str, Any], target_format: str) -> Tuple[Optional[Path], bool]:
+    if target_format == "swift":
+        for image_url in (fallback.get("model_image_url"), page.get("model_image_url")):
+            if isinstance(image_url, str):
+                image_path = image_path_from_page_url(dataset_id, image_url)
+                if image_path and image_path.is_file():
+                    return image_path, True
+        try:
+            page_id = int(page.get("page_id") or fallback.get("page_id") or 0)
+            candidate = find_job_dir(dataset_id) / "model_pages" / f"page_{page_id:03d}_qwen.png"
+            if candidate.is_file():
+                return candidate, True
+        except Exception:
+            pass
+    return image_path_from_page_url(dataset_id, str(page.get("image_url") or "")), False
+
+
+def export_image_target_size(page: Dict[str, Any], fallback: Dict[str, Any]) -> Optional[Tuple[int, int]]:
+    width = int(fallback.get("model_width") or page.get("model_width") or 0)
+    height = int(fallback.get("model_height") or page.get("model_height") or 0)
+    if width > 0 and height > 0:
+        return width, height
+    return None
+
+
+def prepare_portable_image_ref(source_image: Path, target_image: Path, output_dir: Path, target_size: Optional[Tuple[int, int]] = None) -> str:
     """Normalize exported images and return a portable training path.
 
     Vision fine-tuning loaders treat ``images`` as paths/URLs. Absolute local paths
@@ -1257,6 +1290,9 @@ def prepare_portable_image_ref(source_image: Path, target_image: Path, output_di
         image.load()
         if image.mode not in {"RGB", "L"}:
             image = image.convert("RGB")
+        if target_size and image.size != target_size:
+            resampling = getattr(Image, "Resampling", Image).LANCZOS
+            image = image.resize(target_size, resampling)
         image.save(target_image, format="PNG")
     return target_image.relative_to(output_dir).as_posix()
 
@@ -1269,17 +1305,79 @@ def image_path_from_page_url(dataset_id: str, image_url: str) -> Optional[Path]:
     return candidate if candidate.exists() else None
 
 
-def normalize_export_block(block: Dict[str, Any]) -> Dict[str, Any]:
+def normalize_export_block(block: Dict[str, Any], bbox_override: Optional[List[int]] = None) -> Dict[str, Any]:
     label = normalize_block_type(block.get("label") or block.get("block_type"), "text")
     return {
         "id": str(block.get("id") or ""),
         "text": str(block.get("text") or ""),
-        "bbox": block.get("bbox") if isinstance(block.get("bbox"), list) else [0, 0, 1, 1],
+        "bbox": bbox_override if bbox_override is not None else block.get("bbox") if isinstance(block.get("bbox"), list) else [0, 0, 1, 1],
         "page_id": int(block.get("page_id") or 0),
         "block_type": label,
         "weak_heading": bool(block.get("weak_heading", False)),
         "level": normalize_stored_heading_level(block.get("level"), label),
     }
+
+
+def normalize_export_bbox_1000(block: Dict[str, Any], page: Dict[str, Any], fallback: Dict[str, Any], uses_model_page: bool) -> List[int]:
+    existing = normalize_qwen_bbox(block.get("bbox_1000"))
+    if existing is not None:
+        return existing
+
+    source_width = int(page.get("width") or fallback.get("width") or 0)
+    source_height = int(page.get("height") or fallback.get("height") or 0)
+    if source_width <= 0 or source_height <= 0:
+        return normalize_qwen_bbox(block.get("bbox")) or [0, 0, 1, 1]
+
+    bbox = normalize_bbox(block.get("bbox"), source_width, source_height)
+    if bbox is None:
+        return [0, 0, 1, 1]
+
+    x1, y1, x2, y2 = bbox
+    if not uses_model_page:
+        return normalize_qwen_bbox(
+            [
+                x1 / source_width * 1000,
+                y1 / source_height * 1000,
+                x2 / source_width * 1000,
+                y2 / source_height * 1000,
+            ]
+        ) or [0, 0, 1, 1]
+
+    model_width = int(fallback.get("model_width") or page.get("model_width") or 0)
+    model_height = int(fallback.get("model_height") or page.get("model_height") or 0)
+    if model_width <= 0 or model_height <= 0:
+        return normalize_qwen_bbox(
+            [
+                x1 / source_width * 1000,
+                y1 / source_height * 1000,
+                x2 / source_width * 1000,
+                y2 / source_height * 1000,
+            ]
+        ) or [0, 0, 1, 1]
+
+    content_bbox = fallback.get("model_content_bbox") or page.get("model_content_bbox")
+    if not isinstance(content_bbox, list) or len(content_bbox) != 4:
+        content_bbox = [0, 0, model_width, model_height]
+    try:
+        cx1, cy1, cx2, cy2 = [float(value) for value in content_bbox]
+    except Exception:
+        cx1, cy1, cx2, cy2 = 0.0, 0.0, float(model_width), float(model_height)
+    content_width = max(cx2 - cx1, 1.0)
+    content_height = max(cy2 - cy1, 1.0)
+    model_bbox = [
+        cx1 + x1 / source_width * content_width,
+        cy1 + y1 / source_height * content_height,
+        cx1 + x2 / source_width * content_width,
+        cy1 + y2 / source_height * content_height,
+    ]
+    return normalize_qwen_bbox(
+        [
+            model_bbox[0] / model_width * 1000,
+            model_bbox[1] / model_height * 1000,
+            model_bbox[2] / model_width * 1000,
+            model_bbox[3] / model_height * 1000,
+        ]
+    ) or [0, 0, 1, 1]
 
 
 def write_split_files(output_dir: Path, samples: List[Dict[str, Any]], split_type: str) -> List[str]:
