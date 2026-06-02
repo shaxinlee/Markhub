@@ -16,6 +16,7 @@ from features.layout_analysis.service import (  # noqa: E402
     normalize_annotation_block,
     normalize_export_block,
     normalize_heading_level,
+    parse_model_json,
 )
 
 
@@ -39,6 +40,17 @@ def main() -> None:
     assert_true("年度报告" not in context, "前序上下文不应读取 doc_title 层级")
     assert_true("图1 架构图" not in context, "前序上下文不应读取 figure_title 层级")
     assert_true("1、公司简介" in context and "（一）主营业务" in context, "前序上下文应只包含 paragraph_title 层级")
+
+    assert_true(
+        parse_model_json('```json\n{"source":"old"}\n```\n```json\n{"source":"last_json_block"}\n```')["source"] == "last_json_block",
+        "应优先抓取最后一个 json 代码块",
+    )
+    assert_true(
+        parse_model_json('```\n{"source":"outer_fence"}\n```')["source"] == "outer_fence",
+        "没有 json 代码块时应解析去掉代码围栏后的整段内容",
+    )
+    trailing = '说明 {"source":"first"} 后面才是结果 {"source":"last_object","nested":{"keep":true}} 完成'
+    assert_true(parse_model_json(trailing)["source"] == "last_object", "应回退抓取文本里最后一个完整 JSON 对象")
 
     doc_block = {"label": "doc_title", "level": "H1", "bbox": [0, 0, 10, 10]}
     figure_block = {"label": "figure_title", "level": "H2", "bbox": [0, 0, 10, 10]}

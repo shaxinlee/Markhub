@@ -258,21 +258,85 @@ def call_layout_llm(model_page: ModelPageImage, original_page: PageImage, config
 
 def parse_model_json(content: str) -> Dict[str, Any]:
     cleaned = content.strip()
-    cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r"\s*```$", "", cleaned)
-
+    candidates: List[str] = []
+    last_json_block = extract_last_json_code_block(cleaned)
+    if last_json_block is not None:
+        candidates.append(last_json_block.strip())
+    candidates.append(strip_outer_code_fence(cleaned).strip())
     try:
-        payload = json.loads(cleaned)
-    except json.JSONDecodeError:
-        payload = json.loads(extract_first_json_object(cleaned), strict=False)
+        candidates.append(extract_last_json_object(cleaned))
+    except ValueError:
+        pass
+
+    last_error: Optional[Exception] = None
+    payload: Any = None
+    for candidate in candidates:
+        if not candidate:
+            continue
+        try:
+            payload = json.loads(candidate)
+            break
+        except json.JSONDecodeError as exc:
+            last_error = exc
+            try:
+                payload = json.loads(candidate, strict=False)
+                break
+            except json.JSONDecodeError as strict_exc:
+                last_error = strict_exc
+    else:
+        raise ValueError(f"model response does not contain valid JSON: {last_error}") from last_error
 
     if not isinstance(payload, dict):
         raise ValueError("model response is not a JSON object")
     return payload
 
 
+def strip_outer_code_fence(text: str) -> str:
+    match = re.fullmatch(r"\s*```[A-Za-z0-9_-]*\s*\n?(.*?)\s*```\s*", text, flags=re.DOTALL)
+    return match.group(1) if match else text
+
+
+def extract_last_json_code_block(text: str) -> Optional[str]:
+    matches = list(re.finditer(r"```json\s*(.*?)\s*```", text, flags=re.IGNORECASE | re.DOTALL))
+    return matches[-1].group(1) if matches else None
+
+
+def extract_last_json_object(text: str) -> str:
+    depth = 0
+    in_str = False
+    escape = False
+    start: Optional[int] = None
+    last_complete: Optional[str] = None
+    for index, ch in enumerate(text):
+        if in_str:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "{":
+            if depth == 0:
+                start = index
+            depth += 1
+        elif ch == "}" and depth > 0:
+            depth -= 1
+            if depth == 0 and start is not None:
+                last_complete = text[start : index + 1]
+                start = None
+    if last_complete is None:
+        raise ValueError("model response does not contain a complete JSON object")
+    return last_complete
+
+
 def extract_first_json_object(text: str) -> str:
-    start = text.find("{")
+    return extract_json_object_from(text, text.find("{"))
+
+
+def extract_json_object_from(text: str, start: int) -> str:
     if start < 0:
         raise ValueError("model response does not contain JSON")
     depth = 0
