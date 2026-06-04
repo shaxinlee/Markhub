@@ -33,3 +33,4 @@ frontend/*.log
 .tools/
 .claude/
 evaluation/
+output/

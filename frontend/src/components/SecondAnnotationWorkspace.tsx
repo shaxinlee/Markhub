@@ -13,7 +13,6 @@ interface AnnotationBlock {
   modified_fields?: string[];
   updated_at?: string;
   updated_by?: string;
-  weak_heading?: boolean;
   level?: 'H1' | 'H2' | 'H3' | 'H4' | null;
 }
 
@@ -40,7 +39,6 @@ interface BackendBlock {
   page_id?: number;
   block_type?: string;
   label?: string;
-  weak_heading?: boolean;
   level?: 'H1' | 'H2' | 'H3' | 'H4' | null;
 }
 
@@ -194,7 +192,6 @@ export default function SecondAnnotationWorkspace({ datasetId, onGoBack }: Secon
             modified_fields: [],
             updated_at: '',
             updated_by: '',
-            weak_heading: Boolean(block.weak_heading),
             level: block.level || null,
           };
         }),

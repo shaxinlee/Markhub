@@ -26,8 +26,8 @@ DEFAULT_USER_PROMPT = """<image>
 
 要求：
 - 只输出 JSON，不要输出 Markdown 或解释文字。
-- 输出对象必须包含 image_path、blocks、context_before、context_after。
-- blocks 中每个对象必须包含 id、text、bbox、page_id、block_type、weak_heading、level。
+- 输出对象必须包含 image_path、blocks。
+- blocks 中每个对象必须包含 id、text、bbox、page_id、block_type、level。
 - bbox 使用 0-1000 相对坐标，格式为 [左上角x, 左上角y, 右下角x, 右下角y]。
 - block_type 只能使用 doc_title、paragraph_title、text、table_of_contents、table、formula、chart、figure_title、image、vision_footnote、header、footer、caption、handwriting、seal。
 - 只有 paragraph_title 需要判断 level，可为 H1、H2、H3、H4；doc_title 和其他类型 level 必须为 null。
@@ -44,7 +44,6 @@ BLOCK_OUTPUT_KEYS = (
     "bbox",
     "page_id",
     "block_type",
-    "weak_heading",
     "level",
 )
 
@@ -146,8 +145,6 @@ def make_output_blocks(blocks: list[Any]) -> list[dict[str, Any]]:
                 block[key] = str(raw_block.get("text") or "")
             elif key == "page_id":
                 block[key] = int(raw_block.get("page_id") or 0)
-            elif key == "weak_heading":
-                block[key] = bool(raw_block.get("weak_heading"))
             elif key == "level":
                 level = raw_block.get("level")
                 block_type = raw_block.get("block_type")
@@ -253,8 +250,6 @@ def build_sample(
     answer = {
         "image_path": image_ref,
         "blocks": blocks,
-        "context_before": "",
-        "context_after": "",
     }
 
     messages = []

@@ -121,13 +121,20 @@ export default function Workspace({
   const [activeTab, setActiveTab] = useState<'list' | 'json'>('list');
   const [scale, setScale] = useState<number>(0.9);
   const [documentImage, setDocumentImage] = useState<string>('');
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
   const [apiSource, setApiSource] = useState<'default' | 'backend'>('default');
 
   const [analysisJob, setAnalysisJob] = useState<BackendJob | null>(null);
+  const [batchJobIds, setBatchJobIds] = useState<string[]>([]);
+  const [batchProgress, setBatchProgress] = useState({
+    totalFiles: 0,
+    completedFiles: 0,
+    totalPages: 0,
+    completedPages: 0
+  });
   const [jobs, setJobs] = useState<BackendJobSummary[]>([]);
   const [currentPageIndex, setCurrentPageIndex] = useState(0);
   const [segments, setSegments] = useState<AnnotationSegment[]>([]);
@@ -152,9 +159,22 @@ export default function Workspace({
   const availablePageCount = analysisJob?.pages?.length || 0;
   const completedPages = analysisJob?.completed_pages || 0;
   const activeTemplateName = analysisJob?.prompt_template?.name || promptTemplates.find(t => t.id === promptTemplateId)?.name || '默认模板 1';
+  const selectedFileSummary = selectedFiles.length === 0
+    ? 'Backend accepts .pdf files'
+    : selectedFiles.length === 1
+      ? selectedFiles[0].name
+      : `${selectedFiles.length} PDF files selected`;
+  const headerStatus = batchJobIds.length > 1
+    ? `${batchProgress.completedFiles}/${batchProgress.totalFiles || batchJobIds.length} files · ${batchProgress.completedPages}/${batchProgress.totalPages} pages`
+    : analysisJob
+      ? `${analysisJob.status} · ${completedPages}/${displayedPageCount} pages`
+      : 'Backend-ready annotation workspace';
 
   useEffect(() => {
     setDocumentImage(project.images?.[0] || '');
+    setSelectedFiles([]);
+    setBatchJobIds([]);
+    setBatchProgress({ totalFiles: 0, completedFiles: 0, totalPages: 0, completedPages: 0 });
     setSegments([]);
     setHistory([[]]);
     setHistoryPointer(0);
@@ -169,6 +189,7 @@ export default function Workspace({
   }, []);
 
   useEffect(() => {
+    if (batchJobIds.length > 0) return;
     if (!analysisJob?.job_id || analysisJob.status === 'complete') {
       if (analysisJob?.status === 'complete') setIsAnalyzing(false);
       return;
@@ -195,7 +216,59 @@ export default function Workspace({
     }, 1200);
 
     return () => window.clearInterval(timer);
-  }, [analysisJob?.job_id, analysisJob?.status]);
+  }, [analysisJob?.job_id, analysisJob?.status, batchJobIds.length]);
+
+  useEffect(() => {
+    if (batchJobIds.length === 0) return;
+
+    let cancelled = false;
+
+    async function pollBatchJobs() {
+      try {
+        const payloads = await Promise.all(batchJobIds.map((jobId) => fetchJson<BackendJob>(`/api/jobs/${jobId}/result`)));
+        if (cancelled) return;
+
+        const totalPages = payloads.reduce((sum, job) => sum + (job.page_count || 0), 0);
+        const completedPageCount = payloads.reduce((sum, job) => sum + (job.completed_pages || 0), 0);
+        const completedFileCount = payloads.filter((job) => isBackendJobComplete(job.status)).length;
+        const totalFileCount = batchJobIds.length;
+
+        setBatchProgress({
+          totalFiles: totalFileCount,
+          completedFiles: completedFileCount,
+          totalPages,
+          completedPages: completedPageCount
+        });
+
+        const activePayload = payloads.find((job) => job.job_id === analysisJob?.job_id) || payloads[0];
+        if (activePayload) applyJobPayload(activePayload, false, false);
+
+        loadAnalyzedJobs();
+
+        if (completedFileCount >= totalFileCount) {
+          setIsAnalyzing(false);
+          setBatchJobIds([]);
+          setStatusMessage(`Batch complete: ${completedFileCount}/${totalFileCount} files analyzed.`);
+          onUpdateProjectProgress(project.id, 100);
+        } else {
+          setIsAnalyzing(true);
+          setStatusMessage(`Batch processing ${completedFileCount}/${totalFileCount} files · ${completedPageCount}/${totalPages} pages...`);
+        }
+      } catch (error) {
+        if (cancelled) return;
+        setIsAnalyzing(false);
+        setBatchJobIds([]);
+        setErrorMessage(error instanceof Error ? error.message : String(error));
+      }
+    }
+
+    pollBatchJobs();
+    const timer = window.setInterval(pollBatchJobs, 1500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [batchJobIds, analysisJob?.job_id, project.id]);
 
   async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
     const response = await fetch(url, options);
@@ -252,7 +325,6 @@ export default function Workspace({
           confidence: 1,
           pageId: page.page_id,
           level: block.level || null,
-          weakHeading: Boolean(block.weak_heading),
           bbox: block.bbox
         });
       });
@@ -260,14 +332,14 @@ export default function Workspace({
     return mapped;
   }
 
-  function applyJobPayload(payload: BackendJob, record = true) {
+  function applyJobPayload(payload: BackendJob, record = true, updateProject = true) {
     setAnalysisJob(payload);
     setApiSource('backend');
     const nextSegments = mapBackendJobToSegments(payload);
     setSegments(nextSegments);
     if (record) recordHistory(nextSegments);
     if (payload.pages?.length && currentPageIndex >= payload.pages.length) setCurrentPageIndex(0);
-    if (payload.status === 'complete') onUpdateProjectProgress(project.id, 100);
+    if (updateProject && isBackendJobComplete(payload.status)) onUpdateProjectProgress(project.id, 100);
   }
 
   const getColorSchema = (type: BackendBlockType | string) => {
@@ -363,19 +435,24 @@ export default function Workspace({
   const goToNextPage = () => goToPage(currentPageIndex + 1);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (!file.name.toLowerCase().endsWith('.pdf')) {
-      setErrorMessage('Backend analyzer currently accepts PDF files only.');
+    const files = Array.from(e.target.files ?? []) as File[];
+    if (files.length === 0) return;
+    const nonPdf = files.find((file) => !file.name.toLowerCase().endsWith('.pdf'));
+    if (nonPdf) {
+      setErrorMessage(`Backend analyzer accepts PDF files only: ${nonPdf.name}`);
+      e.target.value = '';
       return;
     }
-    setSelectedFile(file);
+    setSelectedFiles(files);
+    setBatchJobIds([]);
+    setBatchProgress({ totalFiles: files.length, completedFiles: 0, totalPages: 0, completedPages: 0 });
     setAnalysisJob(null);
     setCurrentPageIndex(0);
     setSegments([]);
     setSelectedSegmentId(null);
     recordHistory([]);
     setErrorMessage('');
+    e.target.value = '';
   };
 
   const triggerReplaceDocument = () => {
@@ -384,21 +461,53 @@ export default function Workspace({
 
   const handleStartAnalysis = async () => {
     if (isAnalyzing) return;
-    if (!selectedFile) {
-      setErrorMessage('Select a PDF document before starting backend analysis.');
+    if (selectedFiles.length === 0) {
+      setErrorMessage('Select one or more PDF documents before starting backend analysis.');
       return;
     }
 
     setIsAnalyzing(true);
+    setBatchJobIds([]);
     setSegments([]);
     setAnalysisJob(null);
     setCurrentPageIndex(0);
-    setStatusMessage('Uploading PDF to backend layout analyzer...');
+    setStatusMessage(`Uploading ${selectedFiles.length} PDF file${selectedFiles.length > 1 ? 's' : ''} to backend layout analyzer...`);
     setErrorMessage('');
     setApiSource('default');
 
+    try {
+      const createdJobs: BackendJob[] = [];
+      for (let index = 0; index < selectedFiles.length; index += 1) {
+        const file = selectedFiles[index];
+        const form = createAnalysisForm(file);
+        setStatusMessage(`Creating backend jobs ${index + 1}/${selectedFiles.length}: ${file.name}`);
+        const payload = await fetchJson<BackendJob>('/api/analyze', { method: 'POST', body: form });
+        createdJobs.push(payload);
+        if (index === 0) applyJobPayload(payload, true, selectedFiles.length === 1);
+      }
+
+      const jobIds = createdJobs.map((job) => job.job_id);
+      const totalPages = createdJobs.reduce((sum, job) => sum + (job.page_count || 0), 0);
+      setBatchProgress({ totalFiles: jobIds.length, completedFiles: 0, totalPages, completedPages: 0 });
+      setBatchJobIds(jobIds);
+      setStatusMessage(
+        jobIds.length > 1
+          ? `Batch created ${jobIds.length} jobs · 0/${totalPages} pages processed...`
+          : `Backend job created. Processing ${createdJobs[0]?.completed_pages || 0}/${createdJobs[0]?.page_count || 0} pages...`
+      );
+      onIncreaseAnnotationsCount(createdJobs.reduce((sum, job) => sum + (job.result?.blocks?.length || 0), 0));
+      loadAnalyzedJobs();
+    } catch (error) {
+      setIsAnalyzing(false);
+      setBatchJobIds([]);
+      setStatusMessage('');
+      setErrorMessage(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const createAnalysisForm = (file: File) => {
     const form = new FormData();
-    form.append('file', selectedFile);
+    form.append('file', file);
     form.append('dpi', renderDpi || '180');
     form.append('max_pages', maxPages || '50');
     form.append('base_url', baseUrl.trim());
@@ -409,18 +518,7 @@ export default function Workspace({
     form.append('qwen_width', qwenWidth || '1536');
     form.append('qwen_height', qwenHeight || '2176');
     form.append('prompt_template_id', promptTemplateId || 'default_template_1');
-
-    try {
-      const payload = await fetchJson<BackendJob>('/api/analyze', { method: 'POST', body: form });
-      applyJobPayload(payload);
-      setStatusMessage(`Backend job created. Processing ${payload.completed_pages || 0}/${payload.page_count || 0} pages...`);
-      onIncreaseAnnotationsCount(payload.result?.blocks?.length || 0);
-      loadAnalyzedJobs();
-    } catch (error) {
-      setIsAnalyzing(false);
-      setStatusMessage('');
-      setErrorMessage(error instanceof Error ? error.message : String(error));
-    }
+    return form;
   };
 
   const loadJob = async (jobId: string) => {
@@ -545,7 +643,7 @@ export default function Workspace({
             </h1>
             <span className="mt-0.5 flex items-center gap-1 text-[10px] font-mono uppercase tracking-wider text-on-surface-variant">
               <span className={`w-1.5 h-1.5 rounded-full ${isAnalyzing ? 'bg-amber-400 animate-pulse' : 'bg-emerald-500'}`} />
-              {analysisJob ? `${analysisJob.status} · ${completedPages}/${displayedPageCount} pages` : 'Backend-ready annotation workspace'}
+              {headerStatus}
             </span>
           </div>
         </div>
@@ -591,12 +689,18 @@ export default function Workspace({
               className="mb-5 flex cursor-pointer select-none flex-col items-center justify-center rounded-[0.75rem] border border-dashed border-outline-variant/60 bg-surface-container p-5 text-center transition-all hover:border-primary/50 hover:bg-surface-container-high"
             >
               <Upload className="mb-2 h-6 w-6 text-on-surface-variant transition-colors group-hover:text-primary" />
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-on-surface-variant group-hover:text-primary">Replace PDF Document</p>
-              <p className="mt-1 max-w-[230px] truncate text-[10px] text-on-surface-variant">{selectedFile ? selectedFile.name : 'Backend accepts .pdf files'}</p>
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-on-surface-variant group-hover:text-primary">Select PDF Documents</p>
+              <p className="mt-1 max-w-[230px] truncate text-[10px] text-on-surface-variant">{selectedFileSummary}</p>
+              {selectedFiles.length > 1 && (
+                <p className="mt-1 text-[9px] font-mono uppercase tracking-wider text-on-surface-variant">
+                  Batch ready · {selectedFiles.length} files
+                </p>
+              )}
               <input
                 ref={fileInputRef}
                 type="file"
                 accept="application/pdf,.pdf"
+                multiple
                 onChange={handleFileChange}
                 className="hidden"
               />
@@ -708,12 +812,12 @@ export default function Workspace({
                 {isAnalyzing ? (
                   <div className="flex items-center gap-2">
                     <span className="w-4 h-4 border-2 border-outline-variant/70 border-t-transparent rounded-full animate-spin" />
-                    <span>Analyzing Layout...</span>
+                    <span>{batchJobIds.length > 1 ? 'Analyzing Batch...' : 'Analyzing Layout...'}</span>
                   </div>
                 ) : (
                   <>
                     <Play className="w-4 h-4 fill-current text-on-primary" />
-                    <span>Start Analysis</span>
+                    <span>{selectedFiles.length > 1 ? 'Start Batch Analysis' : 'Start Analysis'}</span>
                   </>
                 )}
               </button>
@@ -747,9 +851,9 @@ export default function Workspace({
                 <ChevronRight className="h-3.5 w-3.5" />
               </button>
             </div>
-          ) : selectedFile ? (
+          ) : selectedFiles.length > 0 ? (
             <div className="absolute top-4 left-4 z-20 bg-surface-container-low/90 border border-outline-variant/40 px-3 py-2 text-[10px] font-mono text-on-surface-variant">
-              {selectedFile.name} ready for backend analysis
+              {selectedFileSummary} ready for backend analysis
             </div>
           ) : null}
 
@@ -774,7 +878,7 @@ export default function Workspace({
               {!canvasImage && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center bg-surface-container text-center p-8 text-on-surface-variant">
                   <FileText className="w-10 h-10 mb-3" />
-                  <p className="text-lg font-semibold text-on-surface-variant">Select a PDF and start analysis</p>
+                  <p className="text-lg font-semibold text-on-surface-variant">Select PDF files and start analysis</p>
                 </div>
               )}
 
@@ -937,4 +1041,9 @@ export default function Workspace({
 function clampPercent(value: number) {
   if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.min(100, Number(value.toFixed(3))));
+}
+
+function isBackendJobComplete(status: string) {
+  const normalized = String(status || '').toLowerCase();
+  return normalized === 'complete' || normalized === 'completed' || normalized === 'done';
 }

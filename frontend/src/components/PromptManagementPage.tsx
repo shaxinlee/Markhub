@@ -29,7 +29,6 @@ const PROMPT_TYPES: Array<{ id: PromptType; label: string }> = [
 
 const PROMPT_TASKS: Array<{ id: PromptTaskType; label: string }> = [
   { id: 'layout_analysis', label: '文档版面分析' },
-  { id: 'weak_heading_detection', label: '弱标题识别' },
   { id: 'table_recognition', label: '表格识别' },
   { id: 'image_captioning', label: '图像描述生成' },
   { id: 'data_quality_check', label: '数据质量校验' },

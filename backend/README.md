@@ -96,14 +96,19 @@ Qwen 图像缩放设置也在页面左侧：
   ],
   "result": {
     "image_path": "",
-    "blocks": [],
-    "context_before": "",
-    "context_after": ""
+    "blocks": []
   }
 }
 ```
 
 其中 `result.blocks[*].bbox_1000` 保留 Qwen 返回的 `0-1000` 坐标，`result.blocks[*].model_bbox` 是标准检查图像素坐标，`result.blocks[*].bbox` 是映射后的页面 PNG 原始像素坐标，前端按页面显示尺寸自动缩放叠加。
+
+每页完成后还会在任务目录下同步写入两个 JSONL 文件：
+
+- `Q&A.jsonl`：一行一个页面，包含模型图相对路径、system 提示词、user 提示词和模型完整回复。
+- `layout.jsonl`：一行一个页面，包含原 PDF 页面图相对路径、页面尺寸、模型图信息和版面 blocks；前端展示框与 label 时使用同一套 layout 结构。
+
+二次标注提交后，修正后的 `layout.jsonl` 会保存到 `backend/datasets/second_annotations/{dataset_id}/annotation_v2_*/layout.jsonl`，同时回写原任务目录下 `Q&A.jsonl` 的 assistant 内容。训练数据转换（Swift / LLaMAFactory）从 `Q&A.jsonl` 构建样本。
 
 前端会轮询：
 

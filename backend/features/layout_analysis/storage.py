@@ -34,6 +34,22 @@ from .utils import safe_path_name, sanitize_saved_text, write_env_file
 
 
 CONVERT_TASKS: Dict[str, Dict[str, Any]] = {}
+REMOVED_LAYOUT_OUTPUT_KEYS = {
+    "_".join(("context", "before")),
+    "_".join(("context", "after")),
+    "_".join(("weak", "heading")),
+}
+
+
+def strip_removed_layout_output_keys(value: Any) -> None:
+    if isinstance(value, dict):
+        for key in REMOVED_LAYOUT_OUTPUT_KEYS:
+            value.pop(key, None)
+        for child in value.values():
+            strip_removed_layout_output_keys(child)
+    elif isinstance(value, list):
+        for child in value:
+            strip_removed_layout_output_keys(child)
 
 
 def iso_to_sort_value(value: Any) -> str:
@@ -191,12 +207,13 @@ def normalize_job_payload(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any
     from .prompts import PROMPT_TEMPLATES
     from .schemas import DEFAULT_PROMPT_TEMPLATE_ID
 
+    strip_removed_layout_output_keys(payload)
     payload.setdefault("job_id", job_id)
     payload.setdefault("filename", "未知文件")
     payload.setdefault("status", "complete")
     payload.setdefault("completed_pages", count_finished_pages(payload.get("pages", [])))
     payload.setdefault("pages", [])
-    payload.setdefault("result", {"image_path": "", "blocks": [], "context_before": "", "context_after": ""})
+    payload.setdefault("result", {"image_path": "", "blocks": []})
     payload.setdefault("warnings", [])
     payload.setdefault("errors", [])
     config = payload.get("config")

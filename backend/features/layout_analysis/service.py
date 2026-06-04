@@ -76,6 +76,8 @@ from .utils import (
 
 DEFAULT_SWIFT_USER_PROMPT = prompt_fragment("training", "swift_user")
 DEFAULT_LLAMAFACTORY_INSTRUCTION = prompt_fragment("training", "llamafactory_instruction")
+QA_JSONL_NAME = "Q&A.jsonl"
+LAYOUT_JSONL_NAME = "layout.jsonl"
 
 
 # --------------------------------------------------------------------------
@@ -157,7 +159,7 @@ def image_to_data_url(image_path: Path) -> str:
     return f"data:image/png;base64,{encoded}"
 
 
-def build_heading_context(prior_blocks: List[Dict[str, Any]], recent_limit: int = 8, max_entries: int = 12, text_limit: int = 40) -> str:
+def build_heading_context(prior_blocks: List[Dict[str, Any]], recent_limit: int = 12, max_entries: int = 20, text_limit: int = 40) -> str:
     """Build a compact heading outline from already-analyzed pages.
 
     Per-page level detection is unreliable when a page contains only a few
@@ -172,10 +174,11 @@ def build_heading_context(prior_blocks: List[Dict[str, Any]], recent_limit: int 
         and b.get("block_type") == "paragraph_title"
         and b.get("level") in LEVELS
     ]
-    if not headings:
-        return ""
-
     level_rank = {"H1": 1, "H2": 2, "H3": 3, "H4": 4}
+    levels = ("H1", "H2", "H3", "H4")
+
+    if headings:
+        headings, _ = repair_heading_level_continuity(headings)
 
     def clip(text: Any) -> str:
         compact = re.sub(r"\s+", " ", str(text or "")).strip()
@@ -184,26 +187,45 @@ def build_heading_context(prior_blocks: List[Dict[str, Any]], recent_limit: int 
     # Active ancestor path: the breadcrumb of the most recent heading. Seeing a
     # heading at rank R clears any tracked level deeper than R.
     path: Dict[str, str] = {}
+    appeared_levels: set[str] = set()
     for block in headings:
         level = block["level"]
+        appeared_levels.add(level)
         rank = level_rank[level]
         path = {lvl: txt for lvl, txt in path.items() if level_rank[lvl] < rank}
         path[level] = clip(block.get("text"))
 
     lines: List[str] = [prompt_fragment("heading_context", "header")]
+    empty_value = prompt_fragment("heading_context", "empty_value", default="无")
+    lines.append(prompt_fragment("heading_context", "path_label"))
     if path:
-        lines.append(prompt_fragment("heading_context", "path_label"))
-        for level in ("H1", "H2", "H3", "H4"):
+        for level in levels:
             if level in path:
                 lines.append(f"{'  ' * level_rank[level]}{level}: {path[level]}")
+    else:
+        lines.append("  " + empty_value)
 
     recent = headings[-recent_limit:]
     if len(recent) > max_entries:
         recent = recent[-max_entries:]
+    lines.append(prompt_fragment("heading_context", "recent_label"))
     if recent:
-        lines.append(prompt_fragment("heading_context", "recent_label"))
         for block in recent:
             lines.append(f"  {block['level']} {clip(block.get('text'))}")
+    else:
+        lines.append("  " + empty_value)
+
+    appeared_text = ", ".join(level for level in levels if level in appeared_levels) or empty_value
+    lines.append(prompt_fragment("heading_context", "appeared_label"))
+    lines.append("  " + appeared_text)
+
+    allowed_rank = 1 if not path else min(max(level_rank[level] for level in path) + 1, 4)
+    allowed_levels = [level for level in levels if level_rank[level] <= allowed_rank]
+    forbidden_levels = [level for level in levels if level_rank[level] > allowed_rank]
+    lines.append(prompt_fragment("heading_context", "allowed_label"))
+    lines.append("  " + ", ".join(allowed_levels))
+    lines.append(prompt_fragment("heading_context", "forbidden_label"))
+    lines.append("  " + (", ".join(forbidden_levels) or empty_value))
 
     return "\n".join(lines)
 
@@ -221,7 +243,7 @@ def build_page_user_text(model_page: ModelPageImage, heading_context: str = "") 
     return user_text
 
 
-def call_layout_llm(model_page: ModelPageImage, original_page: PageImage, config: LLMConfig, prompt_template: PromptTemplate, heading_context: str = "") -> Tuple[Dict[str, Any], Dict[str, str]]:
+def call_layout_llm(model_page: ModelPageImage, original_page: PageImage, config: LLMConfig, prompt_template: PromptTemplate, heading_context: str = "") -> Tuple[Dict[str, Any], Dict[str, str], str]:
     """Run one page through the model. Returns the parsed payload plus the exact
     prompt fed to the model (``{"system", "user"}``) so it can be persisted as a
     fine-tuning input alongside the result."""
@@ -253,7 +275,7 @@ def call_layout_llm(model_page: ModelPageImage, original_page: PageImage, config
     )
     content = completion.choices[0].message.content if completion.choices else ""
     model_input = {"system": prompt_template.prompt, "user": user_text}
-    return parse_model_json(content or ""), model_input
+    return parse_model_json(content or ""), model_input, content or ""
 
 
 def parse_model_json(content: str) -> Dict[str, Any]:
@@ -367,7 +389,12 @@ def extract_json_object_from(text: str, start: int) -> str:
 # Block / bbox normalization
 # --------------------------------------------------------------------------
 
-def normalize_blocks(payload: Dict[str, Any], model_page: ModelPageImage, original_page: PageImage) -> Tuple[List[Dict[str, Any]], List[str]]:
+def normalize_blocks(
+    payload: Dict[str, Any],
+    model_page: ModelPageImage,
+    original_page: PageImage,
+    prior_blocks: Optional[List[Dict[str, Any]]] = None,
+) -> Tuple[List[Dict[str, Any]], List[str]]:
     raw_blocks = payload.get("blocks", [])
     warnings: List[str] = []
     if not isinstance(raw_blocks, list):
@@ -404,13 +431,69 @@ def normalize_blocks(payload: Dict[str, Any], model_page: ModelPageImage, origin
                 "model_bbox": model_bbox,
                 "page_id": original_page.page_id,
                 "block_type": block_type,
-                "weak_heading": bool(raw.get("weak_heading", False)),
                 "level": level,
             }
         )
 
     blocks.sort(key=lambda b: (b["page_id"], b["bbox"][1], b["bbox"][0]))
+    blocks, level_warnings = repair_heading_level_continuity(blocks, prior_blocks=prior_blocks)
+    warnings.extend(f"page {original_page.page_id}: {warning}" for warning in level_warnings)
     return blocks, warnings
+
+
+def repair_heading_level_continuity(
+    blocks: List[Dict[str, Any]],
+    prior_blocks: Optional[List[Dict[str, Any]]] = None,
+) -> Tuple[List[Dict[str, Any]], List[str]]:
+    """Clamp paragraph_title levels by the current active heading path.
+
+    Only paragraph_title blocks participate. Seeing H1 clears older H2/H3/H4
+    context, so after H1 -> H2 -> H3 -> H1, the next heading can be at most H2.
+    """
+    level_rank = {"H1": 1, "H2": 2, "H3": 3, "H4": 4}
+    rank_level = {rank: level for level, rank in level_rank.items()}
+    active_path: Dict[int, bool] = {}
+    warnings: List[str] = []
+
+    def repair_level(level: Any) -> Tuple[Optional[str], Optional[str]]:
+        if level not in level_rank:
+            return None, None
+        rank = level_rank[str(level)]
+        allowed_rank = 1 if not active_path else min(max(active_path) + 1, 4)
+        repaired_rank = min(rank, allowed_rank)
+        repaired = rank_level[repaired_rank]
+        allowed_max = rank_level[allowed_rank]
+        active_path_keys = [path_rank for path_rank in active_path if path_rank < repaired_rank]
+        active_path.clear()
+        active_path.update({path_rank: True for path_rank in active_path_keys})
+        active_path[repaired_rank] = True
+        return repaired, allowed_max
+
+    for block in prior_blocks or []:
+        if not isinstance(block, dict):
+            continue
+        if normalize_block_type(block.get("block_type") or block.get("label") or block.get("type"), "text") != "paragraph_title":
+            continue
+        repair_level(block.get("level"))
+
+    repaired_blocks: List[Dict[str, Any]] = []
+    for block in blocks:
+        if not isinstance(block, dict):
+            continue
+        next_block = dict(block)
+        block_type = normalize_block_type(next_block.get("block_type") or next_block.get("label") or next_block.get("type"), "text")
+        if block_type == "paragraph_title":
+            original_level = next_block.get("level")
+            repaired, allowed_max = repair_level(original_level)
+            if repaired and repaired != original_level:
+                warnings.append(
+                    f"{next_block.get('id') or next_block.get('text') or 'paragraph_title'}: level {original_level} 超出当前标题路径允许的最深层级 {allowed_max}，已降级为 {repaired}"
+                )
+            next_block["level"] = repaired
+        else:
+            next_block["level"] = None
+        repaired_blocks.append(next_block)
+    return repaired_blocks, warnings
 
 
 def normalize_qwen_bbox(value: Any) -> Optional[List[int]]:
@@ -575,8 +658,6 @@ def start_analysis_job(
         "result": {
             "image_path": "",
             "blocks": [],
-            "context_before": "",
-            "context_after": "",
         },
         "warnings": [],
         "errors": [],
@@ -612,30 +693,33 @@ def process_job_pages(
         state["pages"][page.page_id]["status"] = "processing"
         write_job_result(job_id, state)
 
-        heading_context = build_heading_context(state["result"].get("blocks", []))
+        prior_blocks = state["result"].get("blocks", [])
+        heading_context = build_heading_context(prior_blocks)
 
         model_page: Optional[ModelPageImage] = None
         try:
-            model_page = resize_page_for_model(page, job_dir=find_job_dir(job_id), config=resize_config)
-            payload, model_input = call_layout_llm(model_page, original_page=page, config=llm_config, prompt_template=prompt_template, heading_context=heading_context)
-            blocks, block_warnings = normalize_blocks(payload, model_page=model_page, original_page=page)
+            job_dir = find_job_dir(job_id)
+            model_page = resize_page_for_model(page, job_dir=job_dir, config=resize_config)
+            payload, model_input, model_response = call_layout_llm(model_page, original_page=page, config=llm_config, prompt_template=prompt_template, heading_context=heading_context)
+            blocks, block_warnings = normalize_blocks(payload, model_page=model_page, original_page=page, prior_blocks=prior_blocks)
+            layout_page = layout_page_from_analysis(page, model_page, blocks, job_dir)
+            upsert_jsonl_record(
+                qa_jsonl_path(job_id),
+                qna_entry_from_page(page.page_id, layout_page["model_image_path"], model_input, model_response),
+            )
+            upsert_jsonl_record(layout_jsonl_path(job_id), layout_page)
 
             state = read_job_result(job_id)
             state["pages"][page.page_id].update(
                 {
                     "status": "done",
-                    "blocks": blocks,
+                    "blocks": layout_page["blocks"],
                     "raw": payload,
                     "model_input": model_input,
-                    "model_image_url": model_page.image_url,
-                    "model_width": model_page.width,
-                    "model_height": model_page.height,
-                    "model_content_bbox": [
-                        model_page.content_x,
-                        model_page.content_y,
-                        model_page.content_x + model_page.content_width,
-                        model_page.content_y + model_page.content_height,
-                    ],
+                    "model_image_url": layout_page["model_image_url"],
+                    "model_width": layout_page["model_width"],
+                    "model_height": layout_page["model_height"],
+                    "model_content_bbox": layout_page["model_content_bbox"],
                 }
             )
             state["result"]["blocks"] = collect_done_blocks(state["pages"])
@@ -670,7 +754,6 @@ def process_job_pages(
     state["completed_pages"] = count_finished_pages(state["pages"])
     state["result"]["blocks"] = collect_done_blocks(state["pages"])
     write_job_result(job_id, state)
-    write_training_jsonl(job_id, state)
 
 
 def collect_done_blocks(pages: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -720,6 +803,172 @@ def ensure_image_token(user_text: str) -> str:
     """Vision training formats expect an ``<image>`` placeholder in the prompt;
     the stored per-page user text omits it, so prepend one when missing."""
     return user_text if "<image>" in user_text else "<image>\n" + user_text
+
+
+def qa_jsonl_path(job_id: str) -> Path:
+    return find_job_dir(job_id) / QA_JSONL_NAME
+
+
+def layout_jsonl_path(job_id: str) -> Path:
+    return find_job_dir(job_id) / LAYOUT_JSONL_NAME
+
+
+def read_jsonl_records(path: Path) -> List[Dict[str, Any]]:
+    if not path.is_file():
+        return []
+    records: List[Dict[str, Any]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        record = json.loads(line)
+        if isinstance(record, dict):
+            records.append(record)
+    return records
+
+
+def write_jsonl_records(path: Path, records: List[Dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(f"{path.name}.{uuid.uuid4().hex[:8]}.tmp")
+    text = "\n".join(json.dumps(record, ensure_ascii=False, separators=(",", ":")) for record in records)
+    tmp_path.write_text(sanitize_saved_text(text + ("\n" if text else "")), encoding="utf-8")
+    tmp_path.replace(path)
+
+
+def upsert_jsonl_record(path: Path, record: Dict[str, Any], key: str = "page_id") -> None:
+    records = read_jsonl_records(path)
+    value = record.get(key)
+    replaced = False
+    next_records: List[Dict[str, Any]] = []
+    for item in records:
+        if item.get(key) == value:
+            next_records.append(record)
+            replaced = True
+        else:
+            next_records.append(item)
+    if not replaced:
+        next_records.append(record)
+    next_records.sort(key=lambda item: int(item.get("page_id") or 0))
+    write_jsonl_records(path, next_records)
+
+
+def path_relative_to_job_dir(path: Path, job_dir: Path) -> str:
+    try:
+        return path.relative_to(job_dir).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
+def page_image_relative_path(page: Dict[str, Any], job_dir: Path) -> str:
+    image_url = str(page.get("image_url") or "")
+    if image_url.startswith("/jobs/"):
+        image_path = job_asset_path(image_url.removeprefix("/jobs/"))
+        return path_relative_to_job_dir(image_path, job_dir)
+    image_path = str(page.get("image_path") or "").strip()
+    return image_path.lstrip("/")
+
+
+def qna_entry_from_page(page_id: int, image_path: str, model_input: Dict[str, str], model_response: str) -> Dict[str, Any]:
+    return {
+        "page_id": page_id,
+        "image": image_path,
+        "system": str(model_input.get("system") or ""),
+        "user": str(model_input.get("user") or ""),
+        "assistant": str(model_response or ""),
+    }
+
+
+def layout_page_from_analysis(page: PageImage, model_page: ModelPageImage, blocks: List[Dict[str, Any]], job_dir: Path) -> Dict[str, Any]:
+    return {
+        "page_id": page.page_id,
+        "image_path": path_relative_to_job_dir(page.image_path, job_dir),
+        "image_url": page.image_url,
+        "width": page.width,
+        "height": page.height,
+        "model_image_path": path_relative_to_job_dir(model_page.image_path, job_dir),
+        "model_image_url": model_page.image_url,
+        "model_width": model_page.width,
+        "model_height": model_page.height,
+        "model_content_bbox": [
+            model_page.content_x,
+            model_page.content_y,
+            model_page.content_x + model_page.content_width,
+            model_page.content_y + model_page.content_height,
+        ],
+        "blocks": blocks,
+    }
+
+
+def layout_pages_from_annotation(payload: Dict[str, Any], annotation_pages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    job_dir = find_job_dir(str(payload.get("job_id") or ""))
+    payload_pages = {int(page.get("page_id") or 0): page for page in payload.get("pages", []) if isinstance(page, dict)}
+    layout_pages: List[Dict[str, Any]] = []
+    for page in annotation_pages:
+        if not isinstance(page, dict):
+            continue
+        page_id = int(page.get("page_id") or 0)
+        source_page = payload_pages.get(page_id) or {}
+        layout_page = {
+            "page_id": page_id,
+            "image_path": page_image_relative_path(source_page or page, job_dir),
+            "image_url": source_page.get("image_url") or page.get("image_url", ""),
+            "width": source_page.get("width", page.get("width", 0)),
+            "height": source_page.get("height", page.get("height", 0)),
+            "blocks": [job_block_from_annotation(block) for block in page.get("blocks", []) if isinstance(block, dict)],
+        }
+        for key in ("model_image_url", "model_width", "model_height", "model_content_bbox"):
+            if source_page.get(key) is not None:
+                layout_page[key] = source_page.get(key)
+        if source_page.get("model_image_url"):
+            model_path = image_path_from_page_url(str(payload.get("job_id") or ""), str(source_page.get("model_image_url") or ""))
+            if model_path:
+                layout_page["model_image_path"] = path_relative_to_job_dir(model_path, job_dir)
+        layout_pages.append(layout_page)
+    layout_pages.sort(key=lambda item: int(item.get("page_id") or 0))
+    return layout_pages
+
+
+def qna_uses_model_page(qna_entry: Dict[str, Any], layout_page: Dict[str, Any]) -> bool:
+    image = str(qna_entry.get("image") or "")
+    model_image = str(layout_page.get("model_image_path") or "")
+    return bool(image and (image == model_image or image.startswith("model_pages/")))
+
+
+def build_qna_answer_from_layout_page(layout_page: Dict[str, Any], qna_entry: Dict[str, Any]) -> Dict[str, Any]:
+    uses_model_page = qna_uses_model_page(qna_entry, layout_page)
+    blocks = [
+        normalize_export_block(
+            block,
+            bbox_override=normalize_export_bbox_1000(block, layout_page, layout_page, uses_model_page) if uses_model_page else None,
+        )
+        for block in layout_page.get("blocks", [])
+        if isinstance(block, dict)
+    ]
+    return {"image_path": str(qna_entry.get("image") or layout_page.get("image_path") or ""), "blocks": blocks}
+
+
+def update_qna_entries_from_layout_pages(qna_entries: List[Dict[str, Any]], layout_pages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    pages_by_id = {int(page.get("page_id") or 0): page for page in layout_pages if isinstance(page, dict)}
+    updated: List[Dict[str, Any]] = []
+    for entry in qna_entries:
+        page_id = int(entry.get("page_id") or 0)
+        layout_page = pages_by_id.get(page_id)
+        if not layout_page:
+            updated.append(dict(entry))
+            continue
+        next_entry = dict(entry)
+        answer = build_qna_answer_from_layout_page(layout_page, next_entry)
+        next_entry["assistant"] = json.dumps(answer, ensure_ascii=False, separators=(",", ":"))
+        updated.append(next_entry)
+    updated.sort(key=lambda item: int(item.get("page_id") or 0))
+    return updated
+
+
+def update_qna_file_from_layout_pages(job_id: str, layout_pages: List[Dict[str, Any]]) -> None:
+    path = qa_jsonl_path(job_id)
+    entries = read_jsonl_records(path)
+    if not entries:
+        return
+    write_jsonl_records(path, update_qna_entries_from_layout_pages(entries, layout_pages))
 
 
 def training_jsonl_path(job_id: str) -> Path:
@@ -778,7 +1027,7 @@ def build_training_lines(
                     "system": training_prompt_system_from_page(payload, page, refresh_builtin_system_prompt),
                     "user": user_text,
                 },
-                "output": {"blocks": blocks, "context_before": "", "context_after": ""},
+                "output": {"blocks": blocks},
             }
         )
         prior_blocks.extend(blocks)
@@ -949,9 +1198,6 @@ def build_annotation_payload(job_id: str, payload: Dict[str, Any], version: str,
                 "width": page.get("width", 0),
                 "height": page.get("height", 0),
                 "blocks": [normalize_annotation_block(block, page_id) for block in raw_blocks if isinstance(block, dict)],
-                # The prompt is the model's input, not annotator-editable, so it
-                # always comes from the authoritative job result, never the edited body.
-                "model_input": resolve_model_input(page.get("model_input"), fallback_page=page),
             }
         )
     return {
@@ -988,7 +1234,6 @@ def normalize_annotation_block(block: Dict[str, Any], page_id: int) -> Dict[str,
         "modified_fields": modified_fields,
         "updated_at": block.get("updated_at") or iso_now(),
         "updated_by": block.get("updated_by") or "",
-        "weak_heading": bool(block.get("weak_heading", block.get("weakHeading", False))),
         "level": normalize_stored_heading_level(block.get("level"), label),
     }
 
@@ -1025,28 +1270,34 @@ def save_second_annotation(job_id: str, body: Dict[str, Any], mode: str) -> Dict
 
     annotation = build_annotation_payload(job_id, payload, "second_annotation", blocks_by_page)
     annotation["updated_at"] = iso_now()
+    layout_pages = layout_pages_from_annotation(payload, annotation.get("pages", []))
+    layout_target: Path
     if mode == "draft":
         target = second_annotation_dir(job_id) / "draft.json"
+        layout_target = second_annotation_dir(job_id) / "draft" / LAYOUT_JSONL_NAME
         state = read_dataset_state(job_id, payload)
         state["annotation_status"] = "second_annotating"
         write_dataset_state(job_id, state)
     elif mode == "overwrite":
         target = first_annotation_path(job_id)
+        layout_target = layout_jsonl_path(job_id)
         overwrite_job_blocks(job_id, payload, annotation)
+        update_qna_file_from_layout_pages(job_id, layout_pages)
         state = read_dataset_state(job_id, payload)
         state["annotation_status"] = "first_annotated"
         write_dataset_state(job_id, state)
     else:
-        target = second_annotation_dir(job_id) / f"annotation_v2_{now_timestamp()}.json"
+        version_name = f"annotation_v2_{now_timestamp()}"
+        target = second_annotation_dir(job_id) / f"{version_name}.json"
+        layout_target = second_annotation_dir(job_id) / version_name / LAYOUT_JSONL_NAME
+        update_qna_file_from_layout_pages(job_id, layout_pages)
         state = read_dataset_state(job_id, payload)
         state["annotation_status"] = "second_annotated"
         state["second_annotated_at"] = int(time.time())
         write_dataset_state(job_id, state)
     write_json_file(target, annotation)
-    # Re-emit the per-page training template from corrected annotations. The
-    # prompt context must follow the edited paragraph_title hierarchy too.
-    repair_training_samples_from_annotations(job_id, payload, blocks_by_page)
-    return {"ok": True, "dataset_id": job_id, "path": str(target), "state": read_dataset_state(job_id, payload)}
+    write_jsonl_records(layout_target, layout_pages)
+    return {"ok": True, "dataset_id": job_id, "path": str(target), "layout_path": str(layout_target), "state": read_dataset_state(job_id, payload)}
 
 
 def overwrite_job_blocks(job_id: str, payload: Dict[str, Any], annotation: Dict[str, Any]) -> None:
@@ -1075,7 +1326,6 @@ def job_block_from_annotation(block: Dict[str, Any]) -> Dict[str, Any]:
         "bbox": block.get("bbox", [0, 0, 1, 1]),
         "page_id": block.get("page_id", 0),
         "block_type": block_type,
-        "weak_heading": bool(block.get("weak_heading", False)),
         "level": normalize_stored_heading_level(block.get("level"), block_type),
     }
 
@@ -1159,9 +1409,7 @@ def run_convert_task(task_id: str, dataset_ids: List[str], target_format: str, m
         for dataset_id in dataset_ids:
             try:
                 payload = read_job_result(dataset_id)
-                ensure_first_annotation(dataset_id, payload)
-                annotation = read_annotation_payload(dataset_id)
-                dataset_samples, dataset_skipped = samples_from_annotation(dataset_id, payload, annotation, target_format, output_dir)
+                dataset_samples, dataset_skipped = samples_from_qna_file(dataset_id, payload, target_format, output_dir)
                 logs.append(f"{dataset_id}: converted {len(dataset_samples)} samples, skipped {dataset_skipped}")
                 samples.extend(dataset_samples)
                 skipped += dataset_skipped
@@ -1257,6 +1505,133 @@ def resolve_convert_output_dir(dataset_ids: List[str], target_format: str, merge
     return root / safe_path_name(output_name)
 
 
+def layout_pages_from_payload(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    job_id = str(payload.get("job_id") or "")
+    job_dir = find_job_dir(job_id)
+    pages: List[Dict[str, Any]] = []
+    for page in payload.get("pages", []):
+        if not isinstance(page, dict):
+            continue
+        layout_page = {
+            "page_id": int(page.get("page_id") or 0),
+            "image_path": page_image_relative_path(page, job_dir),
+            "image_url": page.get("image_url", ""),
+            "width": page.get("width", 0),
+            "height": page.get("height", 0),
+            "blocks": page.get("blocks", []) if isinstance(page.get("blocks"), list) else [],
+        }
+        for key in ("model_image_url", "model_width", "model_height", "model_content_bbox"):
+            if page.get(key) is not None:
+                layout_page[key] = page.get(key)
+        if page.get("model_image_url"):
+            model_path = image_path_from_page_url(job_id, str(page.get("model_image_url") or ""))
+            if model_path:
+                layout_page["model_image_path"] = path_relative_to_job_dir(model_path, job_dir)
+        pages.append(layout_page)
+    pages.sort(key=lambda item: int(item.get("page_id") or 0))
+    return pages
+
+
+def ensure_qna_entries_for_dataset(dataset_id: str, payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    path = qa_jsonl_path(dataset_id)
+    entries = read_jsonl_records(path)
+    if entries:
+        return entries
+
+    layout_pages = read_jsonl_records(layout_jsonl_path(dataset_id))
+    if not layout_pages:
+        layout_pages = layout_pages_from_payload(payload)
+        if layout_pages:
+            write_jsonl_records(layout_jsonl_path(dataset_id), layout_pages)
+    layout_by_id = {int(page.get("page_id") or 0): page for page in layout_pages if isinstance(page, dict)}
+    fallback_entries: List[Dict[str, Any]] = []
+    for page in payload.get("pages", []):
+        if not isinstance(page, dict):
+            continue
+        page_id = int(page.get("page_id") or 0)
+        layout_page = layout_by_id.get(page_id)
+        if not layout_page:
+            continue
+        model_input = resolve_model_input(page.get("model_input"), fallback_page=page)
+        image = str(layout_page.get("model_image_path") or layout_page.get("image_path") or "")
+        entry = qna_entry_from_page(page_id, image, model_input, "")
+        entry["assistant"] = json.dumps(build_qna_answer_from_layout_page(layout_page, entry), ensure_ascii=False, separators=(",", ":"))
+        fallback_entries.append(entry)
+    if fallback_entries:
+        write_jsonl_records(path, fallback_entries)
+    return fallback_entries
+
+
+def assistant_content_for_training(assistant: str, image_ref: str) -> str:
+    try:
+        parsed = parse_model_json(assistant)
+    except Exception:
+        return assistant
+    if not isinstance(parsed, dict) or not isinstance(parsed.get("blocks"), list):
+        return assistant
+    parsed["image_path"] = image_ref
+    return json.dumps(parsed, ensure_ascii=False, separators=(",", ":"))
+
+
+def samples_from_qna_file(dataset_id: str, payload: Dict[str, Any], target_format: str, output_dir: Path) -> Tuple[List[Dict[str, Any]], int]:
+    return samples_from_qna(
+        qna_entries=ensure_qna_entries_for_dataset(dataset_id, payload),
+        dataset_id=dataset_id,
+        job_dir=find_job_dir(dataset_id),
+        target_format=target_format,
+        output_dir=output_dir,
+    )
+
+
+def samples_from_qna(qna_entries: List[Dict[str, Any]], dataset_id: str, job_dir: Path, target_format: str, output_dir: Path) -> Tuple[List[Dict[str, Any]], int]:
+    samples: List[Dict[str, Any]] = []
+    skipped = 0
+    for entry in qna_entries:
+        try:
+            if not isinstance(entry, dict):
+                skipped += 1
+                continue
+            image_rel = str(entry.get("image") or "").strip()
+            if not image_rel:
+                raise FileNotFoundError("missing Q&A image path")
+            source_image = job_dir / image_rel
+            if not source_image.is_file():
+                raise FileNotFoundError(f"image not found: {image_rel}")
+            page_id = int(entry.get("page_id") or 0)
+            target_image = output_dir / "images" / safe_path_name(dataset_id) / f"page_{page_id:03d}{source_image.suffix or '.png'}"
+            image_ref = prepare_portable_image_ref(source_image, target_image, output_dir)
+            system_text = str(entry.get("system") or prompt_fragment("training", "system"))
+            user_text = ensure_image_token(str(entry.get("user") or DEFAULT_SWIFT_USER_PROMPT))
+            assistant_text = assistant_content_for_training(str(entry.get("assistant") or ""), image_ref)
+            if not assistant_text:
+                skipped += 1
+                continue
+            if target_format == "swift":
+                samples.append(
+                    {
+                        "messages": [
+                            {"role": "system", "content": system_text},
+                            {"role": "user", "content": user_text},
+                            {"role": "assistant", "content": assistant_text},
+                        ],
+                        "images": [image_ref],
+                    }
+                )
+            else:
+                samples.append(
+                    {
+                        "instruction": user_text,
+                        "input": "",
+                        "output": assistant_text,
+                        "system": system_text,
+                        "images": [image_ref],
+                    }
+                )
+        except Exception:
+            skipped += 1
+    return samples, skipped
+
+
 def samples_from_annotation(dataset_id: str, payload: Dict[str, Any], annotation: Dict[str, Any], target_format: str, output_dir: Path) -> Tuple[List[Dict[str, Any]], int]:
     samples: List[Dict[str, Any]] = []
     skipped = 0
@@ -1284,7 +1659,7 @@ def samples_from_annotation(dataset_id: str, payload: Dict[str, Any], annotation
             target_image = output_dir / "images" / safe_path_name(dataset_id) / f"page_{int(page.get('page_id') or 0):03d}.png"
             target_size = export_image_target_size(page, fallback) if target_format == "swift" and not uses_model_page else None
             image_ref = prepare_portable_image_ref(source_image, target_image, output_dir, target_size=target_size)
-            answer = json.dumps({"image_path": image_ref, "blocks": blocks, "context_before": "", "context_after": ""}, ensure_ascii=False, separators=(",", ":"))
+            answer = json.dumps({"image_path": image_ref, "blocks": blocks}, ensure_ascii=False, separators=(",", ":"))
             # Use the exact prompt that was sent to the model for this page (the
             # default training template), falling back to the job result then a
             # reconstructed prompt for legacy datasets.
@@ -1377,7 +1752,6 @@ def normalize_export_block(block: Dict[str, Any], bbox_override: Optional[List[i
         "bbox": bbox_override if bbox_override is not None else block.get("bbox") if isinstance(block.get("bbox"), list) else [0, 0, 1, 1],
         "page_id": int(block.get("page_id") or 0),
         "block_type": label,
-        "weak_heading": bool(block.get("weak_heading", False)),
         "level": normalize_stored_heading_level(block.get("level"), label),
     }
 

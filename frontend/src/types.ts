@@ -77,7 +77,6 @@ export type PromptType =
 
 export type PromptTaskType =
   | 'layout_analysis'
-  | 'weak_heading_detection'
   | 'table_recognition'
   | 'image_captioning'
   | 'data_quality_check'
@@ -155,7 +154,6 @@ export interface BackendBlock {
   bbox: [number, number, number, number];
   page_id: number;
   block_type: BackendBlockType;
-  weak_heading?: boolean;
   level?: 'H1' | 'H2' | 'H3' | 'H4' | null;
 }
 
@@ -206,7 +204,6 @@ export interface AnnotationSegment {
   confidence: number;
   pageId?: number;
   level?: 'H1' | 'H2' | 'H3' | 'H4' | null;
-  weakHeading?: boolean;
   bbox?: [number, number, number, number];
 }
 

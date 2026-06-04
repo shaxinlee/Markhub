@@ -53,7 +53,7 @@ RESIZE_PRESETS = {
 }
 
 DEFAULT_PROMPT_TEMPLATE_ID = "default_template_1"
-BUILTIN_LAYOUT_PROMPT_REVISION = "layout_prompt_v20260601_paragraph_title_levels_only"
+BUILTIN_LAYOUT_PROMPT_REVISION = "layout_prompt_v20260604_remove_unused_fields"
 PROMPT_TEMPLATE_CATEGORIES = {"bounding_box", "polygon", "layout", "keypoints", "text_transcription"}
 PROMPT_TYPES = {
     "data_annotation",
@@ -66,7 +66,6 @@ PROMPT_TYPES = {
 }
 PROMPT_TASK_TYPES = {
     "layout_analysis",
-    "weak_heading_detection",
     "table_recognition",
     "image_captioning",
     "data_quality_check",
