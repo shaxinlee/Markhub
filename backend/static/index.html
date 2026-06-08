@@ -705,12 +705,11 @@
       "table",
       "formula",
       "chart",
-      "figure_title",
       "image",
+      "caption",
       "vision_footnote",
       "header",
       "footer",
-      "caption",
       "handwriting",
       "seal"
     ];
@@ -722,12 +721,11 @@
       table: "#238823",
       formula: "#f43f5e",
       chart: "#22c55e",
-      figure_title: "#8a5a00",
       image: "#7a3db8",
+      caption: "#d946ef",
       vision_footnote: "#b3261e",
       header: "#64748b",
       footer: "#78716c",
-      caption: "#d946ef",
       handwriting: "#f97316",
       seal: "#ef4444"
     };
@@ -888,7 +886,16 @@
     }
 
     function blockType(block) {
-      return block.block_type === "list" ? "table_of_contents" : block.block_type;
+      const aliases = {
+        list: "table_of_contents",
+        title: "paragraph_title",
+        figure_title: "caption",
+        figure: "image",
+        footnote: "vision_footnote",
+        reference: "vision_footnote",
+        other: "text"
+      };
+      return aliases[block.block_type] || block.block_type;
     }
 
     function visibleBlocks() {

@@ -19,7 +19,6 @@ BLOCK_TYPES = {
     "table",
     "formula",
     "chart",
-    "figure_title",
     "image",
     "vision_footnote",
     "header",
@@ -28,7 +27,15 @@ BLOCK_TYPES = {
     "handwriting",
     "seal",
 }
-BLOCK_TYPE_ALIASES = {"list": "table_of_contents"}
+BLOCK_TYPE_ALIASES = {
+    "list": "table_of_contents",
+    "title": "paragraph_title",
+    "figure_title": "caption",
+    "figure": "image",
+    "footnote": "vision_footnote",
+    "reference": "vision_footnote",
+    "other": "text",
+}
 LEVELS = {"H1", "H2", "H3", "H4"}
 
 DEFAULT_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
@@ -53,7 +60,7 @@ RESIZE_PRESETS = {
 }
 
 DEFAULT_PROMPT_TEMPLATE_ID = "default_template_1"
-BUILTIN_LAYOUT_PROMPT_REVISION = "layout_prompt_v20260604_remove_unused_fields"
+BUILTIN_LAYOUT_PROMPT_REVISION = "layout_prompt_v20260606_chart_description"
 PROMPT_TEMPLATE_CATEGORIES = {"bounding_box", "polygon", "layout", "keypoints", "text_transcription"}
 PROMPT_TYPES = {
     "data_annotation",
@@ -78,22 +85,16 @@ PROMPT_TASK_TYPES = {
 PROMPT_STATUS = {"enabled", "disabled"}
 DATASET_LABEL_TYPES = {
     "doc_title",
-    "title",
     "paragraph_title",
     "text",
     "table",
-    "figure",
     "chart",
     "formula",
     "seal",
     "header",
     "footer",
-    "footnote",
-    "reference",
     "caption",
     "table_of_contents",
-    "other",
-    "figure_title",
     "image",
     "vision_footnote",
     "handwriting",

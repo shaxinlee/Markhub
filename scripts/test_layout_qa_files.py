@@ -37,6 +37,13 @@ def main() -> None:
                 "system": "system prompt",
                 "user": "user prompt",
                 "assistant": "{\"image_path\":\"model_pages/page_000_qwen.png\",\"blocks\":[]}",
+            },
+            {
+                "page_id": 1,
+                "image": "model_pages/page_000_qwen.png",
+                "system": "system prompt",
+                "user": "stale user prompt",
+                "assistant": "{\"image_path\":\"model_pages/page_000_qwen.png\",\"blocks\":[]}",
             }
         ]
         layout_pages = [
@@ -56,6 +63,25 @@ def main() -> None:
                         "bbox": [10, 20, 50, 100],
                         "page_id": 0,
                         "block_type": "paragraph_title",
+                        "level": "H1",
+                    }
+                ],
+            },
+            {
+                "page_id": 1,
+                "image_path": "pages/page_001.png",
+                "width": 100,
+                "height": 200,
+                "model_image_path": "model_pages/page_000_qwen.png",
+                "model_width": 100,
+                "model_height": 200,
+                "blocks": [
+                    {
+                        "id": "p001_b000",
+                        "text": "章内条目",
+                        "bbox": [10, 20, 50, 100],
+                        "page_id": 1,
+                        "block_type": "paragraph_title",
                         "level": "H2",
                     }
                 ],
@@ -68,6 +94,7 @@ def main() -> None:
 
         updated_qna = update_qna_entries_from_layout_pages(qna_entries, layout_pages)
         assert_true("修正标题" in updated_qna[0]["assistant"], "二标完成后应把 layout 结果回写到 Q&A assistant")
+        assert_true("H1: 修正标题" in updated_qna[1]["user"], "二标完成后应按修正后的标题层级重建后续 Q&A user prompt")
 
         output_dir = root / "swift"
         samples, skipped = samples_from_qna(
@@ -77,9 +104,10 @@ def main() -> None:
             target_format="swift",
             output_dir=output_dir,
         )
-        assert_true(skipped == 0 and len(samples) == 1, "应从 Q&A 生成一条训练样本")
+        assert_true(skipped == 0 and len(samples) == 2, "应从 Q&A 生成训练样本")
         assert_true(samples[0]["messages"][0]["content"] == "system prompt", "训练样本 system 应来自 Q&A")
-        assert_true(samples[0]["messages"][1]["content"].startswith("<image>\nuser prompt"), "训练样本 user 应来自 Q&A 并带 image token")
+        assert_true(samples[0]["messages"][1]["content"].startswith("<image>\n当前页面 page_id=0"), "训练样本 user 应来自重建后的 Q&A 并带 image token")
+        assert_true("H1: 修正标题" in samples[1]["messages"][1]["content"], "训练样本 user 应包含二标后的前序标题层级")
         assert_true("修正标题" in samples[0]["messages"][2]["content"], "训练样本 assistant 应来自更新后的 Q&A")
         assert_true((output_dir / samples[0]["images"][0]).is_file(), "训练图片应从 Q&A 相对路径复制")
 

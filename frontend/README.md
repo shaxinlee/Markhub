@@ -26,4 +26,4 @@ The frontend server runs on `http://localhost:3000` and proxies `/api/*` and `/j
 - Model endpoint, API key, timeout, render DPI, max pages, Qwen resize, and prompt template controls.
 - Backend job polling through `GET /api/jobs/{job_id}/result`.
 - History loading and deletion through `GET /api/jobs` and `DELETE /api/jobs/{job_id}`.
-- Real backend block types: `doc_title`, `paragraph_title`, `text`, `table_of_contents`, `table`, `figure_title`, `image`, and `vision_footnote`.
+- Real backend block types: `doc_title`, `paragraph_title`, `text`, `table_of_contents`, `table`, `formula`, `chart`, `image`, `caption`, `vision_footnote`, `header`, `footer`, `handwriting`, and `seal`.

@@ -29,17 +29,17 @@ def assert_true(condition: bool, message: str) -> None:
 def main() -> None:
     assert_true(normalize_heading_level("H1", "doc_title", "年度报告") is None, "doc_title 不应保留层级")
     assert_true(normalize_heading_level("H2", "paragraph_title", "1、公司简介") == "H2", "paragraph_title 应保留合法层级")
-    assert_true(normalize_heading_level("H3", "figure_title", "图1 架构图") is None, "非 paragraph_title 不应保留层级")
+    assert_true(normalize_heading_level("H3", "caption", "图1 架构图") is None, "非 paragraph_title 不应保留层级")
 
     prior_blocks = [
         {"block_type": "doc_title", "level": "H1", "text": "年度报告"},
-        {"block_type": "figure_title", "level": "H2", "text": "图1 架构图"},
+        {"block_type": "caption", "level": "H2", "text": "图1 架构图"},
         {"block_type": "paragraph_title", "level": "H2", "text": "1、公司简介"},
         {"block_type": "paragraph_title", "level": "H3", "text": "（一）主营业务"},
     ]
     context = build_heading_context(prior_blocks)
     assert_true("年度报告" not in context, "前序上下文不应读取 doc_title 层级")
-    assert_true("图1 架构图" not in context, "前序上下文不应读取 figure_title 层级")
+    assert_true("图1 架构图" not in context, "前序上下文不应读取 caption 层级")
     assert_true("1、公司简介" in context and "（一）主营业务" in context, "前序上下文应只包含 paragraph_title 层级")
     assert_true("当前有效标题路径" in context, "前序上下文应提供 current_heading_path")
     assert_true("最近识别的 paragraph_title 序列" in context, "前序上下文应提供 recent_paragraph_titles")
@@ -97,10 +97,21 @@ def main() -> None:
     assert_true(parse_model_json(trailing)["source"] == "last_object", "应回退抓取文本里最后一个完整 JSON 对象")
 
     doc_block = {"label": "doc_title", "level": "H1", "bbox": [0, 0, 10, 10]}
-    figure_block = {"label": "figure_title", "level": "H2", "bbox": [0, 0, 10, 10]}
+    caption_block = {"label": "caption", "level": "H2", "bbox": [0, 0, 10, 10]}
+    legacy_figure_block = {"label": "figure_title", "level": "H2", "bbox": [0, 0, 10, 10]}
+    legacy_footnote_block = {"label": "footnote", "bbox": [0, 0, 10, 10]}
+    legacy_other_block = {"label": "other", "bbox": [0, 0, 10, 10]}
     para_block = {"label": "paragraph_title", "level": "H3", "bbox": [0, 0, 10, 10]}
+    chart_block = {"label": "chart", "chart_description": "图表展示收入逐年上升", "bbox": [0, 0, 10, 10]}
+    text_with_chart_description = {"label": "text", "chart_description": "不应保留", "bbox": [0, 0, 10, 10]}
     assert_true(normalize_annotation_block(doc_block, 0)["level"] is None, "标注保存时 doc_title 层级应清空")
-    assert_true(job_block_from_annotation(figure_block)["level"] is None, "回写任务结果时非 paragraph_title 层级应清空")
+    assert_true(job_block_from_annotation(caption_block)["level"] is None, "回写任务结果时非 paragraph_title 层级应清空")
+    assert_true(normalize_annotation_block(legacy_figure_block, 0)["label"] == "caption", "旧 figure_title 应归一为 caption")
+    assert_true(normalize_annotation_block(legacy_footnote_block, 0)["label"] == "vision_footnote", "旧 footnote 应归一为 vision_footnote")
+    assert_true(normalize_annotation_block(legacy_other_block, 0)["label"] == "text", "旧 other 应归一为 text")
+    assert_true(normalize_annotation_block(chart_block, 0)["chart_description"] == "图表展示收入逐年上升", "chart 应保留 chart_description")
+    assert_true(normalize_annotation_block(text_with_chart_description, 0)["chart_description"] == "", "非 chart 应清空 chart_description")
+    assert_true(job_block_from_annotation(chart_block)["chart_description"] == "图表展示收入逐年上升", "回写任务结果时 chart_description 应保留")
     assert_true(normalize_export_block(para_block)["level"] == "H3", "导出时 paragraph_title 层级应保留")
     collected = collect_done_blocks([{"blocks": [doc_block, para_block]}])
     assert_true(collected[0]["level"] is None and collected[1]["level"] == "H3", "聚合结果时只应保留 paragraph_title 层级")

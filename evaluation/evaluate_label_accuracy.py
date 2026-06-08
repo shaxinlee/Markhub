@@ -115,47 +115,45 @@ def json_files_by_job(root: str) -> Dict[str, str]:
     return files
 
 
-def match_blocks(
-    gt_blocks: List[Dict[str, Any]],
-    pred_blocks: List[Dict[str, Any]],
-    min_gt_coverage: float,
-    min_iou: float,
-) -> Tuple[Dict[int, Tuple[int, float, float]], set, set]:
-    candidates: List[Tuple[float, float, int, int]] = []
-    preds_by_page: Dict[int, List[Tuple[int, Dict[str, Any]]]] = defaultdict(list)
-    for pred_index, pred in enumerate(pred_blocks):
-        preds_by_page[pred["page_id"]].append((pred_index, pred))
-
-    for gt_index, gt in enumerate(gt_blocks):
-        for pred_index, pred in preds_by_page.get(gt["page_id"], []):
-            coverage, iou = bbox_metrics(gt["bbox"], pred["bbox"])
-            if coverage >= min_gt_coverage and iou >= min_iou:
-                candidates.append((coverage, iou, gt_index, pred_index))
-
-    candidates.sort(reverse=True)
-    matched: Dict[int, Tuple[int, float, float]] = {}
-    used_gt: set = set()
-    used_pred: set = set()
-    for coverage, iou, gt_index, pred_index in candidates:
-        if gt_index in used_gt or pred_index in used_pred:
+def discover_first_annotation_files(root: str) -> Dict[str, str]:
+    """Find first-pass Markhub annotations under backend/datasets/first_annotations."""
+    if not os.path.isdir(root):
+        return {}
+    files: Dict[str, str] = {}
+    for current_root, _dirs, names in os.walk(root):
+        if "result.json" not in names:
             continue
-        matched[gt_index] = (pred_index, coverage, iou)
-        used_gt.add(gt_index)
-        used_pred.add(pred_index)
-    return matched, used_gt, used_pred
+        path = os.path.join(current_root, "result.json")
+        job_id = os.path.basename(current_root)
+        files[job_id] = path
+    return dict(sorted(files.items()))
 
 
-def evaluate(datasets_dir: str, min_gt_coverage: float = 0.8, min_iou: float = 0.0) -> Dict[str, Any]:
-    gt_root = os.path.join(datasets_dir, "ground_truth")
-    pred_root = os.path.join(datasets_dir, "model_pre")
-    if not os.path.isdir(gt_root):
-        raise SystemExit(f"找不到 ground_truth 目录: {gt_root}")
-    if not os.path.isdir(pred_root):
-        raise SystemExit(f"找不到 model_pre 目录: {pred_root}")
+def discover_second_annotation_files(root: str) -> Dict[str, str]:
+    """Find latest submitted second-pass Markhub annotation for each job."""
+    if not os.path.isdir(root):
+        return {}
+    files: Dict[str, str] = {}
+    for job_id in sorted(os.listdir(root)):
+        job_dir = os.path.join(root, job_id)
+        if not os.path.isdir(job_dir):
+            continue
+        candidates = sorted(
+            os.path.join(job_dir, name)
+            for name in os.listdir(job_dir)
+            if name.startswith("annotation_v2_") and name.endswith(".json")
+        )
+        if candidates:
+            files[job_id] = candidates[-1]
+    return files
 
-    gt_files = json_files_by_job(gt_root)
-    pred_files = json_files_by_job(pred_root)
 
+def evaluate_file_maps(
+    gt_files: Dict[str, str],
+    pred_files: Dict[str, str],
+    min_gt_coverage: float = 0.8,
+    min_iou: float = 0.0,
+) -> Dict[str, Any]:
     support = defaultdict(int)
     correct = defaultdict(int)
     predicted = defaultdict(int)
@@ -183,7 +181,7 @@ def evaluate(datasets_dir: str, min_gt_coverage: float = 0.8, min_iou: float = 0
         gt_path = gt_files[job_id]
         pred_path = pred_files.get(job_id)
         if not pred_path:
-            skipped.append((job_id, "找不到对应 model_pre"))
+            skipped.append((job_id, "找不到对应 model_pre/一次标注"))
             continue
 
         gt_blocks = load_blocks(gt_path)
@@ -262,7 +260,7 @@ def evaluate(datasets_dir: str, min_gt_coverage: float = 0.8, min_iou: float = 0
         )
 
     for job_id in sorted(set(pred_files) - set(gt_files)):
-        skipped.append((job_id, "model_pre 没有对应 ground_truth"))
+        skipped.append((job_id, "model_pre/一次标注没有对应 ground_truth/二次标注"))
 
     return {
         "support": support,
@@ -288,6 +286,58 @@ def evaluate(datasets_dir: str, min_gt_coverage: float = 0.8, min_iou: float = 0
         "min_gt_coverage": min_gt_coverage,
         "min_iou": min_iou,
     }
+
+
+def evaluate_annotation_roots(
+    ground_truth_root: str,
+    model_pre_root: str,
+    min_gt_coverage: float = 0.8,
+    min_iou: float = 0.0,
+) -> Dict[str, Any]:
+    gt_files = discover_second_annotation_files(ground_truth_root) or json_files_by_job(ground_truth_root)
+    pred_files = discover_first_annotation_files(model_pre_root) or json_files_by_job(model_pre_root)
+    return evaluate_file_maps(gt_files, pred_files, min_gt_coverage=min_gt_coverage, min_iou=min_iou)
+
+
+def match_blocks(
+    gt_blocks: List[Dict[str, Any]],
+    pred_blocks: List[Dict[str, Any]],
+    min_gt_coverage: float,
+    min_iou: float,
+) -> Tuple[Dict[int, Tuple[int, float, float]], set, set]:
+    candidates: List[Tuple[float, float, int, int]] = []
+    preds_by_page: Dict[int, List[Tuple[int, Dict[str, Any]]]] = defaultdict(list)
+    for pred_index, pred in enumerate(pred_blocks):
+        preds_by_page[pred["page_id"]].append((pred_index, pred))
+
+    for gt_index, gt in enumerate(gt_blocks):
+        for pred_index, pred in preds_by_page.get(gt["page_id"], []):
+            coverage, iou = bbox_metrics(gt["bbox"], pred["bbox"])
+            if coverage >= min_gt_coverage and iou >= min_iou:
+                candidates.append((coverage, iou, gt_index, pred_index))
+
+    candidates.sort(reverse=True)
+    matched: Dict[int, Tuple[int, float, float]] = {}
+    used_gt: set = set()
+    used_pred: set = set()
+    for coverage, iou, gt_index, pred_index in candidates:
+        if gt_index in used_gt or pred_index in used_pred:
+            continue
+        matched[gt_index] = (pred_index, coverage, iou)
+        used_gt.add(gt_index)
+        used_pred.add(pred_index)
+    return matched, used_gt, used_pred
+
+
+def evaluate(datasets_dir: str, min_gt_coverage: float = 0.8, min_iou: float = 0.0) -> Dict[str, Any]:
+    gt_root = os.path.join(datasets_dir, "ground_truth")
+    pred_root = os.path.join(datasets_dir, "model_pre")
+    if not os.path.isdir(gt_root):
+        raise SystemExit(f"找不到 ground_truth 目录: {gt_root}")
+    if not os.path.isdir(pred_root):
+        raise SystemExit(f"找不到 model_pre 目录: {pred_root}")
+
+    return evaluate_annotation_roots(gt_root, pred_root, min_gt_coverage=min_gt_coverage, min_iou=min_iou)
 
 
 def f1_score(precision: float, recall: float) -> float:
@@ -432,12 +482,24 @@ def result_to_jsonable(r: Dict[str, Any]) -> Dict[str, Any]:
 def main() -> None:
     parser = argparse.ArgumentParser(description="按 bbox + label 评估 model_pre 相对 ground_truth 的准确率")
     parser.add_argument("--datasets", default=DEFAULT_DATASETS, help=f"datasets 目录 (默认: {DEFAULT_DATASETS})")
+    parser.add_argument("--first-annotations", help="一次标注目录，例如 backend/datasets/first_annotations")
+    parser.add_argument("--second-annotations", help="二次标注目录，例如 backend/datasets/second_annotations；作为标准答案")
     parser.add_argument("--min-gt-coverage", type=float, default=0.8, help="预测 bbox 至少覆盖 GT bbox 的比例")
     parser.add_argument("--min-iou", type=float, default=0.0, help="可选 IoU 下限")
     parser.add_argument("--json", metavar="PATH", help="可选: 将结果以 JSON 写入该文件")
     args = parser.parse_args()
 
-    result = evaluate(args.datasets, min_gt_coverage=args.min_gt_coverage, min_iou=args.min_iou)
+    if args.first_annotations or args.second_annotations:
+        if not args.first_annotations or not args.second_annotations:
+            raise SystemExit("--first-annotations 与 --second-annotations 需要同时提供")
+        result = evaluate_annotation_roots(
+            args.second_annotations,
+            args.first_annotations,
+            min_gt_coverage=args.min_gt_coverage,
+            min_iou=args.min_iou,
+        )
+    else:
+        result = evaluate(args.datasets, min_gt_coverage=args.min_gt_coverage, min_iou=args.min_iou)
     print_report(result)
     if args.json:
         with open(args.json, "w", encoding="utf-8") as f:

@@ -139,7 +139,6 @@ export type BackendBlockType =
   | 'table'
   | 'formula'
   | 'chart'
-  | 'figure_title'
   | 'image'
   | 'vision_footnote'
   | 'header'
@@ -154,6 +153,7 @@ export interface BackendBlock {
   bbox: [number, number, number, number];
   page_id: number;
   block_type: BackendBlockType;
+  chart_description?: string;
   level?: 'H1' | 'H2' | 'H3' | 'H4' | null;
 }
 
@@ -201,6 +201,7 @@ export interface AnnotationSegment {
   type: BackendBlockType;
   box: [number, number, number, number]; // [top, left, width, height] in percentage (0 to 100)
   text: string;
+  chartDescription?: string;
   confidence: number;
   pageId?: number;
   level?: 'H1' | 'H2' | 'H3' | 'H4' | null;

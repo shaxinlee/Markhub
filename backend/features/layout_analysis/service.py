@@ -419,6 +419,7 @@ def normalize_blocks(
         bbox = scale_bbox(model_bbox, model_page, original_page)
 
         text = "" if raw.get("text") is None else str(raw.get("text"))
+        chart_description = str(raw.get("chart_description") or "") if block_type == "chart" else ""
         level = normalize_heading_level(raw.get("level"), block_type, text)
 
         block_no = len(blocks)
@@ -431,6 +432,7 @@ def normalize_blocks(
                 "model_bbox": model_bbox,
                 "page_id": original_page.page_id,
                 "block_type": block_type,
+                "chart_description": chart_description,
                 "level": level,
             }
         )
@@ -948,6 +950,14 @@ def build_qna_answer_from_layout_page(layout_page: Dict[str, Any], qna_entry: Di
 
 def update_qna_entries_from_layout_pages(qna_entries: List[Dict[str, Any]], layout_pages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     pages_by_id = {int(page.get("page_id") or 0): page for page in layout_pages if isinstance(page, dict)}
+    sorted_layout_pages = sorted((page for page in layout_pages if isinstance(page, dict)), key=lambda item: int(item.get("page_id") or 0))
+    prior_blocks_by_page: Dict[int, List[Dict[str, Any]]] = {}
+    prior_blocks: List[Dict[str, Any]] = []
+    for page in sorted_layout_pages:
+        page_id = int(page.get("page_id") or 0)
+        prior_blocks_by_page[page_id] = list(prior_blocks)
+        prior_blocks.extend(normalize_export_block(block) for block in page.get("blocks", []) if isinstance(block, dict))
+
     updated: List[Dict[str, Any]] = []
     for entry in qna_entries:
         page_id = int(entry.get("page_id") or 0)
@@ -957,6 +967,7 @@ def update_qna_entries_from_layout_pages(qna_entries: List[Dict[str, Any]], layo
             continue
         next_entry = dict(entry)
         answer = build_qna_answer_from_layout_page(layout_page, next_entry)
+        next_entry["user"] = training_prompt_user_from_page(layout_page, build_heading_context(prior_blocks_by_page.get(page_id, [])))
         next_entry["assistant"] = json.dumps(answer, ensure_ascii=False, separators=(",", ":"))
         updated.append(next_entry)
     updated.sort(key=lambda item: int(item.get("page_id") or 0))
@@ -1214,7 +1225,7 @@ def build_annotation_payload(job_id: str, payload: Dict[str, Any], version: str,
 def normalize_annotation_block(block: Dict[str, Any], page_id: int) -> Dict[str, Any]:
     label = normalize_block_type(block.get("label") or block.get("block_type") or block.get("type"), "text")
     if label not in DATASET_LABEL_TYPES:
-        label = "other"
+        label = "text"
     source = str(block.get("source") or "model")
     modified_fields = block.get("modified_fields")
     if not isinstance(modified_fields, list):
@@ -1228,6 +1239,7 @@ def normalize_annotation_block(block: Dict[str, Any], page_id: int) -> Dict[str,
         "label": label,
         "block_type": label,
         "text": str(block.get("text") or ""),
+        "chart_description": str(block.get("chart_description") or "") if label == "chart" else "",
         "page_id": int(block.get("page_id") if block.get("page_id") is not None else page_id),
         "source": source,
         "modified": bool(block.get("modified", source == "manual")),
@@ -1326,6 +1338,7 @@ def job_block_from_annotation(block: Dict[str, Any]) -> Dict[str, Any]:
         "bbox": block.get("bbox", [0, 0, 1, 1]),
         "page_id": block.get("page_id", 0),
         "block_type": block_type,
+        "chart_description": str(block.get("chart_description") or "") if block_type == "chart" else "",
         "level": normalize_stored_heading_level(block.get("level"), block_type),
     }
 
@@ -1752,6 +1765,7 @@ def normalize_export_block(block: Dict[str, Any], bbox_override: Optional[List[i
         "bbox": bbox_override if bbox_override is not None else block.get("bbox") if isinstance(block.get("bbox"), list) else [0, 0, 1, 1],
         "page_id": int(block.get("page_id") or 0),
         "block_type": label,
+        "chart_description": str(block.get("chart_description") or "") if label == "chart" else "",
         "level": normalize_stored_heading_level(block.get("level"), label),
     }
 

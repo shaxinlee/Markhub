@@ -7,6 +7,7 @@ interface AnnotationBlock {
   label: string;
   block_type?: string;
   text: string;
+  chart_description?: string;
   page_id: number;
   source?: string;
   modified?: boolean;
@@ -39,6 +40,7 @@ interface BackendBlock {
   page_id?: number;
   block_type?: string;
   label?: string;
+  chart_description?: string;
   level?: 'H1' | 'H2' | 'H3' | 'H4' | null;
 }
 
@@ -65,26 +67,32 @@ type DragMode = 'move' | 'resize' | 'draw';
 
 const DEFAULT_LABEL_TYPES = [
   'doc_title',
-  'title',
   'paragraph_title',
   'text',
   'table_of_contents',
-  'handwriting',
   'table',
   'formula',
-  'figure',
   'chart',
-  'seal',
+  'image',
+  'caption',
+  'vision_footnote',
   'header',
   'footer',
-  'footnote',
-  'reference',
-  'caption',
-  'other',
+  'handwriting',
+  'seal',
 ];
 
 function normalizeLabel(label: string) {
-  return label === 'list' ? 'table_of_contents' : label;
+  const aliases: Record<string, string> = {
+    list: 'table_of_contents',
+    title: 'paragraph_title',
+    figure_title: 'caption',
+    figure: 'image',
+    footnote: 'vision_footnote',
+    reference: 'vision_footnote',
+    other: 'text',
+  };
+  return aliases[label] || label;
 }
 
 function normalizeAnnotationPayload(payload: AnnotationPayload): AnnotationPayload {
@@ -186,6 +194,7 @@ export default function SecondAnnotationWorkspace({ datasetId, onGoBack }: Secon
             label,
             block_type: label,
             text: block.text || '',
+            chart_description: label === 'chart' ? block.chart_description || '' : '',
             page_id: block.page_id ?? page.page_id,
             source: 'model',
             modified: false,
@@ -246,6 +255,7 @@ export default function SecondAnnotationWorkspace({ datasetId, onGoBack }: Secon
       label: 'text',
       block_type: 'text',
       text: '',
+      chart_description: '',
       page_id: currentPage.page_id,
       source: 'manual',
       modified: true,
@@ -508,6 +518,17 @@ export default function SecondAnnotationWorkspace({ datasetId, onGoBack }: Secon
                   className="w-full resize-none border border-outline-variant/40 bg-surface-container px-3 py-2 text-sm text-on-surface outline-none focus:border-primary/40"
                 />
               </div>
+              {selectedBlock.label === 'chart' ? (
+                <div>
+                  <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-on-surface-variant">Chart Description</label>
+                  <textarea
+                    value={selectedBlock.chart_description || ''}
+                    onChange={(event) => updateSelectedBlock({ chart_description: event.target.value }, ['chart_description'])}
+                    rows={4}
+                    className="w-full resize-none border border-outline-variant/40 bg-surface-container px-3 py-2 text-sm text-on-surface outline-none focus:border-primary/40"
+                  />
+                </div>
+              ) : null}
               <div className="border border-outline-variant/40 bg-surface-container p-3 text-[11px] text-on-surface-variant">
                 <p>ID: {selectedBlock.id}</p>
                 <p>BBox: [{selectedBlock.bbox.join(', ')}]</p>

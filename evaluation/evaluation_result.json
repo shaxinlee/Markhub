@@ -1,89 +1,89 @@
 {
   "min_gt_coverage": 0.8,
   "min_iou": 0.0,
-  "overall_accuracy": 0.9383259911894273,
-  "total_gt": 1135,
-  "total_matched": 1121,
-  "total_correct": 1065,
-  "missing": 14,
-  "extra": 45,
+  "overall_accuracy": 0.9562383612662942,
+  "total_gt": 1074,
+  "total_matched": 1069,
+  "total_correct": 1027,
+  "missing": 5,
+  "extra": 0,
   "per_label": {
     "caption": {
-      "support": 7,
-      "correct": 7,
-      "predicted": 7,
+      "support": 29,
+      "correct": 26,
+      "predicted": 26,
+      "recall": 0.896551724137931,
+      "precision": 1.0,
+      "f1": 0.9454545454545454
+    },
+    "chart": {
+      "support": 6,
+      "correct": 6,
+      "predicted": 6,
       "recall": 1.0,
       "precision": 1.0,
       "f1": 1.0
     },
     "doc_title": {
-      "support": 12,
-      "correct": 12,
-      "predicted": 14,
+      "support": 11,
+      "correct": 11,
+      "predicted": 11,
       "recall": 1.0,
-      "precision": 0.8571428571428571,
-      "f1": 0.923076923076923
-    },
-    "figure_title": {
-      "support": 21,
-      "correct": 19,
-      "predicted": 19,
-      "recall": 0.9047619047619048,
       "precision": 1.0,
-      "f1": 0.9500000000000001
+      "f1": 1.0
     },
     "footer": {
-      "support": 92,
-      "correct": 92,
-      "predicted": 96,
+      "support": 93,
+      "correct": 93,
+      "predicted": 93,
       "recall": 1.0,
-      "precision": 0.9583333333333334,
-      "f1": 0.9787234042553191
+      "precision": 1.0,
+      "f1": 1.0
     },
     "handwriting": {
-      "support": 26,
-      "correct": 25,
-      "predicted": 28,
-      "recall": 0.9615384615384616,
-      "precision": 0.8928571428571429,
-      "f1": 0.9259259259259259
+      "support": 29,
+      "correct": 29,
+      "predicted": 29,
+      "recall": 1.0,
+      "precision": 1.0,
+      "f1": 1.0
     },
     "header": {
-      "support": 92,
-      "correct": 92,
-      "predicted": 92,
+      "support": 93,
+      "correct": 93,
+      "predicted": 93,
       "recall": 1.0,
       "precision": 1.0,
       "f1": 1.0
     },
     "image": {
-      "support": 21,
-      "correct": 17,
-      "predicted": 17,
-      "recall": 0.8095238095238095,
+      "support": 15,
+      "correct": 15,
+      "predicted": 15,
+      "recall": 1.0,
       "precision": 1.0,
-      "f1": 0.8947368421052632
+      "f1": 1.0
     },
     "paragraph_title": {
-      "support": 247,
-      "correct": 222,
-      "predicted": 260,
-      "recall": 0.8987854251012146,
-      "precision": 0.8538461538461538,
-      "f1": 0.8757396449704142
+      "support": 239,
+      "correct": 230,
+      "predicted": 265,
+      "recall": 0.9623430962343096,
+      "precision": 0.8679245283018868,
+      "f1": 0.9126984126984127
     },
     "seal": {
       "support": 13,
-      "correct": 8,
-      "predicted": 18,
-      "recall": 0.6153846153846154,
-      "precision": 0.4444444444444444,
-      "f1": 0.5161290322580646
+      "correct": 13,
+      "predicted": 13,
+      "recall": 1.0,
+      "precision": 1.0,
+      "f1": 1.0
     },
     "table": {
-      "support": 31,
-      "correct": 31,
-      "predicted": 31,
+      "support": 32,
+      "correct": 32,
+      "predicted": 32,
       "recall": 1.0,
       "precision": 1.0,
       "f1": 1.0
@@ -97,12 +97,12 @@
       "f1": 1.0
     },
     "text": {
-      "support": 565,
-      "correct": 532,
-      "predicted": 576,
-      "recall": 0.9415929203539823,
-      "precision": 0.9236111111111112,
-      "f1": 0.9325153374233129
+      "support": 506,
+      "correct": 471,
+      "predicted": 478,
+      "recall": 0.9308300395256917,
+      "precision": 0.9853556485355649,
+      "f1": 0.9573170731707317
     },
     "vision_footnote": {
       "support": 6,
@@ -115,74 +115,92 @@
   },
   "paragraph_title_by_level": {
     "H1": {
-      "support": 77,
-      "correct": 75,
-      "predicted": 78,
-      "recall": 0.974025974025974,
-      "precision": 0.9615384615384616,
-      "f1": 0.967741935483871
+      "support": 85,
+      "correct": 85,
+      "predicted": 87,
+      "recall": 1.0,
+      "precision": 0.9770114942528736,
+      "f1": 0.9883720930232558
     },
     "H2": {
-      "support": 77,
-      "correct": 49,
-      "predicted": 55,
-      "recall": 0.6363636363636364,
-      "precision": 0.8909090909090909,
-      "f1": 0.7424242424242423
+      "support": 93,
+      "correct": 88,
+      "predicted": 92,
+      "recall": 0.946236559139785,
+      "precision": 0.9565217391304348,
+      "f1": 0.9513513513513514
     },
     "H3": {
-      "support": 40,
-      "correct": 27,
-      "predicted": 64,
-      "recall": 0.675,
-      "precision": 0.421875,
-      "f1": 0.5192307692307693
+      "support": 30,
+      "correct": 28,
+      "predicted": 32,
+      "recall": 0.9333333333333333,
+      "precision": 0.875,
+      "f1": 0.9032258064516129
     },
     "H4": {
-      "support": 53,
-      "correct": 37,
-      "predicted": 63,
-      "recall": 0.6981132075471698,
-      "precision": 0.5873015873015873,
-      "f1": 0.6379310344827586
+      "support": 31,
+      "correct": 29,
+      "predicted": 54,
+      "recall": 0.9354838709677419,
+      "precision": 0.5370370370370371,
+      "f1": 0.6823529411764706
     }
   },
   "job_rows": [
     {
-      "job_id": "3658d83afe24",
-      "gt": 359,
-      "matched": 353,
-      "correct": 332,
-      "recall": 0.924791086350975,
-      "missing": 6,
-      "extra": 5
-    },
-    {
-      "job_id": "cf3c6d8d4a48",
-      "gt": 176,
-      "matched": 175,
-      "correct": 175,
-      "recall": 0.9943181818181818,
-      "missing": 1,
-      "extra": 3
-    },
-    {
-      "job_id": "e18783403e50",
-      "gt": 131,
-      "matched": 131,
-      "correct": 130,
-      "recall": 0.9923664122137404,
+      "job_id": "07551ecabbe9",
+      "gt": 169,
+      "matched": 169,
+      "correct": 168,
+      "recall": 0.9940828402366864,
       "missing": 0,
-      "extra": 2
+      "extra": 0
     },
     {
-      "job_id": "fcd5026a8cb2",
-      "gt": 469,
-      "matched": 462,
-      "correct": 428,
-      "recall": 0.9125799573560768,
-      "missing": 7,
-      "extra": 35
+      "job_id": "32c7f969d06d",
+      "gt": 218,
+      "matched": 216,
+      "correct": 209,
+      "recall": 0.9587155963302753,
+      "missing": 2,
+      "extra": 0
+    },
+    {
+      "job_id": "403e48354808",
+      "gt": 118,
+      "matched": 118,
+      "correct": 118,
+      "recall": 1.0,
+      "missing": 0,
+      "extra": 0
+    },
+    {
+      "job_id": "8e0cf41723ee",
+      "gt": 117,
+      "matched": 115,
+      "correct": 115,
+      "recall": 0.9829059829059829,
+      "missing": 2,
+      "extra": 0
+    },
+    {
+      "job_id": "9601296855d4",
+      "gt": 228,
+      "matched": 228,
+      "correct": 203,
+      "recall": 0.8903508771929824,
+      "missing": 0,
+      "extra": 0
+    },
+    {
+      "job_id": "b181d6454a76",
+      "gt": 224,
+      "matched": 223,
+      "correct": 214,
+      "recall": 0.9553571428571429,
+      "missing": 1,
+      "extra": 0
     }
   ],
   "skipped": []

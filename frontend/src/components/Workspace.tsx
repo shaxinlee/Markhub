@@ -47,7 +47,6 @@ const BLOCK_TYPES: BackendBlockType[] = [
   'table',
   'formula',
   'chart',
-  'figure_title',
   'image',
   'vision_footnote',
   'header',
@@ -65,7 +64,6 @@ const BLOCK_TYPE_LABELS: Record<BackendBlockType, string> = {
   table: 'Table',
   formula: 'Formula',
   chart: 'Chart',
-  figure_title: 'Figure Title',
   image: 'Image',
   vision_footnote: 'Footnote',
   header: 'Header',
@@ -83,7 +81,6 @@ const DEFAULT_VISIBLE_TYPES: Record<BackendBlockType, boolean> = {
   table: true,
   formula: true,
   chart: true,
-  figure_title: true,
   image: true,
   vision_footnote: true,
   header: true,
@@ -94,7 +91,17 @@ const DEFAULT_VISIBLE_TYPES: Record<BackendBlockType, boolean> = {
 };
 
 function normalizeBackendBlockType(type: string): BackendBlockType {
-  return (type === 'list' ? 'table_of_contents' : type) as BackendBlockType;
+  const aliases: Record<string, BackendBlockType> = {
+    list: 'table_of_contents',
+    title: 'paragraph_title',
+    figure_title: 'caption',
+    figure: 'image',
+    footnote: 'vision_footnote',
+    reference: 'vision_footnote',
+    other: 'text',
+  };
+  const normalized = aliases[type] || type;
+  return BLOCK_TYPES.includes(normalized as BackendBlockType) ? (normalized as BackendBlockType) : 'text';
 }
 
 export default function Workspace({
@@ -322,6 +329,7 @@ export default function Workspace({
             clampPercent(((y2 - y1) / Math.max(page.height, 1)) * 100)
           ],
           text: block.text || `[${block.bbox?.join(', ') || 'bbox'}]`,
+          chartDescription: block.chart_description || '',
           confidence: 1,
           pageId: page.page_id,
           level: block.level || null,
@@ -351,7 +359,6 @@ export default function Workspace({
       case 'table': return { border: '#10B981', bg: 'rgba(16, 185, 129, 0.1)', text: '#10B981' };
       case 'formula': return { border: '#F43F5E', bg: 'rgba(244, 63, 94, 0.1)', text: '#F43F5E' };
       case 'chart': return { border: '#22C55E', bg: 'rgba(34, 197, 94, 0.1)', text: '#22C55E' };
-      case 'figure_title': return { border: '#F59E0B', bg: 'rgba(245, 158, 11, 0.1)', text: '#F59E0B' };
       case 'image': return { border: '#EC4899', bg: 'rgba(236, 72, 153, 0.1)', text: '#EC4899' };
       case 'vision_footnote': return { border: '#14B8A6', bg: 'rgba(20, 184, 166, 0.1)', text: '#14B8A6' };
       case 'header': return { border: '#64748B', bg: 'rgba(100, 116, 139, 0.1)', text: '#64748B' };
@@ -598,6 +605,7 @@ export default function Workspace({
       type: newBoxType,
       box: drawnBoxPercent,
       text: newBoxText.trim() || `User annotated ${BLOCK_TYPE_LABELS[newBoxType]} zone`,
+      chartDescription: '',
       confidence: 1,
       pageId: currentPage?.page_id ?? 0
     };
@@ -982,7 +990,12 @@ export default function Workspace({
                         </div>
                         {seg.type === 'table' ? (
                           <div className="flex items-center gap-2 bg-surface-container p-2 rounded-[0.75rem] text-xs text-on-surface font-medium border border-outline-variant/30"><Table className="w-4 h-4 text-on-surface-variant" /><span className="truncate font-serif italic text-on-surface-variant">{seg.text}</span></div>
-                        ) : seg.type === 'image' || seg.type === 'figure_title' ? (
+                        ) : seg.type === 'chart' ? (
+                          <div className="space-y-1 rounded-[0.75rem] border border-outline-variant/30 bg-surface-container p-2 text-xs">
+                            <p className="truncate font-serif italic text-on-surface-variant">{seg.text}</p>
+                            {seg.chartDescription ? <p className="line-clamp-2 text-on-surface-variant">{seg.chartDescription}</p> : null}
+                          </div>
+                        ) : seg.type === 'image' ? (
                           <div className="flex items-center gap-2 bg-surface-container p-2 rounded-[0.75rem] text-xs text-on-surface font-medium border border-outline-variant/30"><ImageIcon className="w-4 h-4 text-on-surface-variant" /><span className="truncate font-serif italic text-on-surface-variant">{seg.text}</span></div>
                         ) : (
                           <p className="text-xs text-on-surface-variant leading-relaxed line-clamp-3 font-sans">{seg.text}</p>
