@@ -49,6 +49,7 @@ http://127.0.0.1:8787
 - `LAYOUT_RENDER_DPI`：PDF 渲染 DPI，默认 `180`
 - `LAYOUT_MAX_PAGES`：单次最多分析页数，默认 `50`
 - `QWEN_RESIZE_PRESET`：页面检查图默认档位，`speed/default/high/custom`，默认 `default`
+- `QWEN_IMAGE_PROFILE`：模型图像规格，`qwen3_6` 保持固定画布，`qwen3_5` 使用 Qwen3VL 等比动态分辨率
 - `QWEN_RESIZED_WIDTH`：自定义检查图宽度，默认 `1536`
 - `QWEN_RESIZED_HEIGHT`：自定义检查图高度，默认 `2176`
 

@@ -553,6 +553,7 @@ def env_config() -> Dict[str, str]:
         "max_pages": os.getenv("LAYOUT_MAX_PAGES", "50"),
         "max_pdf_bytes": str(max_pdf_bytes()),
         "qwen_preset": os.getenv("QWEN_RESIZE_PRESET", "default"),
+        "qwen_image_profile": os.getenv("QWEN_IMAGE_PROFILE", "qwen3_6"),
         "qwen_width": os.getenv("QWEN_RESIZED_WIDTH", "1536"),
         "qwen_height": os.getenv("QWEN_RESIZED_HEIGHT", "2176"),
         "prompt_template_id": str((default_layout_prompt or {}).get("id") or DEFAULT_PROMPT_TEMPLATE_ID),

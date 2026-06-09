@@ -178,7 +178,7 @@ export interface BackendJob {
   warnings?: string[];
   errors?: string[];
   config?: { model?: string; base_url?: string; timeout?: string; model_dir?: string };
-  resize?: { preset?: string; width?: number; height?: number };
+  resize?: { preset?: string; image_profile?: string; width?: number; height?: number };
   prompt_template?: { id?: string; name?: string };
 }
 
@@ -190,6 +190,7 @@ export interface BackendConfig {
   max_pages?: string;
   max_pdf_bytes?: string;
   qwen_preset?: string;
+  qwen_image_profile?: string;
   qwen_width?: string;
   qwen_height?: string;
   prompt_template_id?: string;

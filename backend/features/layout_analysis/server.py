@@ -575,6 +575,9 @@ def parse_resize_config(fields: Dict[str, Any]) -> VisionResizeConfig:
     preset = clean_text(fields.get("qwen_preset"), env_config()["qwen_preset"])
     if preset not in RESIZE_PRESETS and preset != "custom":
         preset = "default"
+    image_profile = clean_text(fields.get("qwen_image_profile"), env_config().get("qwen_image_profile", "qwen3_6"))
+    if image_profile not in {"qwen3_6", "qwen3_5"}:
+        image_profile = "qwen3_6"
 
     if preset in RESIZE_PRESETS:
         width, height = RESIZE_PRESETS[preset]
@@ -586,7 +589,7 @@ def parse_resize_config(fields: Dict[str, Any]) -> VisionResizeConfig:
     height = align_to_factor(height, 32)
     if width * height <= 0:
         raise ValueError("invalid Qwen resize dimensions")
-    return VisionResizeConfig(width=width, height=height, preset=preset, factor=32)
+    return VisionResizeConfig(width=width, height=height, preset=preset, factor=32, image_profile=image_profile)
 
 
 def main() -> int:

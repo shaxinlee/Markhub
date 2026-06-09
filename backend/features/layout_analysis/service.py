@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 import json
+import math
 import re
 import shutil
 import threading
@@ -119,6 +120,34 @@ def dimensions_for_page(page: PageImage, config: VisionResizeConfig) -> Tuple[in
     return width, height
 
 
+def _floor_by_factor(value: float, factor: int) -> int:
+    return max(factor, int(math.floor(value / factor)) * factor)
+
+
+def _ceil_by_factor(value: float, factor: int) -> int:
+    return max(factor, int(math.ceil(value / factor)) * factor)
+
+
+def _round_by_factor(value: float, factor: int) -> int:
+    return max(factor, int(round(value / factor)) * factor)
+
+
+def smart_resize_dimensions(width: int, height: int, max_pixels: int, factor: int = 32, min_pixels: Optional[int] = None) -> Tuple[int, int]:
+    min_pixels = min_pixels if min_pixels is not None else factor * factor * 4
+    max_pixels = max(min_pixels, max_pixels)
+    resized_w = _round_by_factor(width, factor)
+    resized_h = _round_by_factor(height, factor)
+    if resized_w * resized_h > max_pixels:
+        beta = math.sqrt((width * height) / max_pixels)
+        resized_w = _floor_by_factor(width / beta, factor)
+        resized_h = _floor_by_factor(height / beta, factor)
+    elif resized_w * resized_h < min_pixels:
+        beta = math.sqrt(min_pixels / max(width * height, 1))
+        resized_w = _ceil_by_factor(width * beta, factor)
+        resized_h = _ceil_by_factor(height * beta, factor)
+    return resized_w, resized_h
+
+
 def resize_page_for_model(page: PageImage, job_dir: Path, config: VisionResizeConfig) -> ModelPageImage:
     target_w, target_h = dimensions_for_page(page, config)
     model_dir = job_dir / "model_pages"
@@ -127,16 +156,27 @@ def resize_page_for_model(page: PageImage, job_dir: Path, config: VisionResizeCo
 
     with Image.open(page.image_path) as image:
         image = image.convert("RGB")
-        scale = min(target_w / page.width, target_h / page.height)
-        content_w = max(1, int(round(page.width * scale)))
-        content_h = max(1, int(round(page.height * scale)))
-        content_x = (target_w - content_w) // 2
-        content_y = (target_h - content_h) // 2
         resampling = getattr(Image, "Resampling", Image).LANCZOS
-        resized = image.resize((content_w, content_h), resampling)
-        canvas = Image.new("RGB", (target_w, target_h), "white")
-        canvas.paste(resized, (content_x, content_y))
-        canvas.save(out_path, format="PNG")
+        if config.image_profile == "qwen3_5":
+            target_w, target_h = smart_resize_dimensions(
+                page.width,
+                page.height,
+                max_pixels=config.width * config.height,
+                factor=config.factor,
+            )
+            content_w, content_h = target_w, target_h
+            content_x, content_y = 0, 0
+            image.resize((content_w, content_h), resampling).save(out_path, format="PNG")
+        else:
+            scale = min(target_w / page.width, target_h / page.height)
+            content_w = max(1, int(round(page.width * scale)))
+            content_h = max(1, int(round(page.height * scale)))
+            content_x = (target_w - content_w) // 2
+            content_y = (target_h - content_h) // 2
+            resized = image.resize((content_w, content_h), resampling)
+            canvas = Image.new("RGB", (target_w, target_h), "white")
+            canvas.paste(resized, (content_x, content_y))
+            canvas.save(out_path, format="PNG")
 
     return ModelPageImage(
         page_id=page.page_id,

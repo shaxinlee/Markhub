@@ -49,6 +49,7 @@ ENV_CONFIG_KEYS = [
     "LAYOUT_MAX_PAGES",
     "LAYOUT_MAX_PDF_BYTES",
     "QWEN_RESIZE_PRESET",
+    "QWEN_IMAGE_PROFILE",
     "QWEN_RESIZED_WIDTH",
     "QWEN_RESIZED_HEIGHT",
 ]
@@ -139,6 +140,7 @@ class VisionResizeConfig:
     height: int = 2176
     preset: str = "default"
     factor: int = 32
+    image_profile: str = "qwen3_6"
 
     @property
     def pixels(self) -> int:

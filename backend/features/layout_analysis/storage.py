@@ -131,6 +131,7 @@ def job_asset_path(relative_path: str) -> Path:
 def public_resize_config(config: VisionResizeConfig) -> Dict[str, Any]:
     return {
         "preset": config.preset,
+        "image_profile": config.image_profile,
         "factor": config.factor,
         "width": config.width,
         "height": config.height,
@@ -155,6 +156,7 @@ def persist_runtime_config(
         "LAYOUT_RENDER_DPI": str(dpi),
         "LAYOUT_MAX_PAGES": str(max_pages),
         "QWEN_RESIZE_PRESET": resize_config.preset,
+        "QWEN_IMAGE_PROFILE": resize_config.image_profile,
         "QWEN_RESIZED_WIDTH": str(resize_config.width),
         "QWEN_RESIZED_HEIGHT": str(resize_config.height),
     }
