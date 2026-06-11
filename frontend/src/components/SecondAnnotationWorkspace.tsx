@@ -7,6 +7,7 @@ interface AnnotationBlock {
   label: string;
   block_type?: string;
   text: string;
+  description?: string;
   chart_description?: string;
   page_id: number;
   source?: string;
@@ -40,6 +41,7 @@ interface BackendBlock {
   page_id?: number;
   block_type?: string;
   label?: string;
+  description?: string;
   chart_description?: string;
   level?: 'H1' | 'H2' | 'H3' | 'H4' | null;
 }
@@ -73,6 +75,7 @@ const DEFAULT_LABEL_TYPES = [
   'table',
   'formula',
   'chart',
+  'flowchart',
   'image',
   'caption',
   'vision_footnote',
@@ -105,7 +108,13 @@ function normalizeAnnotationPayload(payload: AnnotationPayload): AnnotationPaylo
       ...page,
       blocks: (page.blocks || []).map((block) => {
         const label = normalizeLabel(block.label || block.block_type || 'text');
-        return { ...block, label, block_type: label };
+        const { chart_description: legacyDescription, ...rest } = block;
+        return {
+          ...rest,
+          label,
+          block_type: label,
+          description: label === 'chart' || label === 'flowchart' ? block.description || legacyDescription || '' : '',
+        };
       }),
     })),
   };
@@ -194,7 +203,7 @@ export default function SecondAnnotationWorkspace({ datasetId, onGoBack }: Secon
             label,
             block_type: label,
             text: block.text || '',
-            chart_description: label === 'chart' ? block.chart_description || '' : '',
+            description: label === 'chart' || label === 'flowchart' ? block.description || block.chart_description || '' : '',
             page_id: block.page_id ?? page.page_id,
             source: 'model',
             modified: false,
@@ -255,7 +264,7 @@ export default function SecondAnnotationWorkspace({ datasetId, onGoBack }: Secon
       label: 'text',
       block_type: 'text',
       text: '',
-      chart_description: '',
+      description: '',
       page_id: currentPage.page_id,
       source: 'manual',
       modified: true,
@@ -518,12 +527,12 @@ export default function SecondAnnotationWorkspace({ datasetId, onGoBack }: Secon
                   className="w-full resize-none border border-outline-variant/40 bg-surface-container px-3 py-2 text-sm text-on-surface outline-none focus:border-primary/40"
                 />
               </div>
-              {selectedBlock.label === 'chart' ? (
+              {selectedBlock.label === 'chart' || selectedBlock.label === 'flowchart' ? (
                 <div>
-                  <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-on-surface-variant">Chart Description</label>
+                  <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-on-surface-variant">Description</label>
                   <textarea
-                    value={selectedBlock.chart_description || ''}
-                    onChange={(event) => updateSelectedBlock({ chart_description: event.target.value }, ['chart_description'])}
+                    value={selectedBlock.description || ''}
+                    onChange={(event) => updateSelectedBlock({ description: event.target.value }, ['description'])}
                     rows={4}
                     className="w-full resize-none border border-outline-variant/40 bg-surface-container px-3 py-2 text-sm text-on-surface outline-none focus:border-primary/40"
                   />

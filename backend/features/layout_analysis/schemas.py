@@ -19,6 +19,7 @@ BLOCK_TYPES = {
     "table",
     "formula",
     "chart",
+    "flowchart",
     "image",
     "vision_footnote",
     "header",
@@ -61,7 +62,7 @@ RESIZE_PRESETS = {
 }
 
 DEFAULT_PROMPT_TEMPLATE_ID = "default_template_1"
-BUILTIN_LAYOUT_PROMPT_REVISION = "layout_prompt_v20260606_chart_description"
+BUILTIN_LAYOUT_PROMPT_REVISION = "layout_prompt_v20260611_description"
 PROMPT_TEMPLATE_CATEGORIES = {"bounding_box", "polygon", "layout", "keypoints", "text_transcription"}
 PROMPT_TYPES = {
     "data_annotation",
@@ -92,6 +93,7 @@ DATASET_LABEL_TYPES = {
     "chart",
     "formula",
     "seal",
+    "flowchart",
     "header",
     "footer",
     "caption",

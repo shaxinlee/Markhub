@@ -139,6 +139,7 @@ export type BackendBlockType =
   | 'table'
   | 'formula'
   | 'chart'
+  | 'flowchart'
   | 'image'
   | 'vision_footnote'
   | 'header'
@@ -153,6 +154,7 @@ export interface BackendBlock {
   bbox: [number, number, number, number];
   page_id: number;
   block_type: BackendBlockType;
+  description?: string;
   chart_description?: string;
   level?: 'H1' | 'H2' | 'H3' | 'H4' | null;
 }

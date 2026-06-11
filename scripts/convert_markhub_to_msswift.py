@@ -27,22 +27,22 @@ DEFAULT_USER_PROMPT = """<image>
 要求：
 - 只输出 JSON，不要输出 Markdown 或解释文字。
 - 输出对象必须包含 image_path、blocks。
-- blocks 中每个对象必须包含 id、text、chart_description、bbox、page_id、block_type、level。
+- blocks 中每个对象必须包含 id、text、description、bbox、page_id、block_type、level。
 - bbox 使用 0-1000 相对坐标，格式为 [左上角x, 左上角y, 右下角x, 右下角y]。
-- block_type 只能使用 doc_title、paragraph_title、text、table_of_contents、table、formula、chart、image、caption、vision_footnote、header、footer、handwriting、seal。
+- block_type 只能使用 doc_title、paragraph_title、text、table_of_contents、table、formula、chart、flowchart、image、caption、vision_footnote、header、footer、handwriting、seal。
 - 只有 paragraph_title 需要判断 level，可为 H1、H2、H3、H4；doc_title 和其他类型 level 必须为 null。
-- 必须逐类扫描页面：标题、正文、目录、表格、公式、图表、图片/流程图、caption、单位/资料来源、页眉页脚、手写字、印章。
-- table_of_contents 表示文档目录、目录页、带页码的章节索引、点线引导目录；table 表示行列结构；formula 表示数学/化学公式；chart 表示数据图表主体；header/footer 表示页眉页脚；caption 表示图/表/公式/图片的标题、题注和解释说明；vision_footnote 表示单位、资料来源、注释和备注。
-- chart 类型必须填写 chart_description，用一两句概括图表表达的对象、指标、趋势、对比或主要信息；其他类型 chart_description 必须为空字符串。
-- 不要把公式、图表、手写字、印章误标为 image 或 text；不要把 caption、单位说明、资料来源并入主体块。
-- formula 表示数学/化学公式；chart 表示柱状图、折线图、饼图等数据图表主体，且 chart_description 保存对图表内容的简要理解；caption 表示图/表/公式/图片的标题、题注和解释说明；vision_footnote 表示单位、资料来源、注释和备注。
+- 必须逐类扫描页面：标题、正文、目录、表格、公式、图表、流程图、图片、caption、单位/资料来源、页眉页脚、手写字、印章。
+- table_of_contents 表示文档目录、目录页、带页码的章节索引、点线引导目录；table 表示行列结构；formula 表示数学/化学公式；chart 表示数据图表主体；flowchart 表示流程图、步骤流转图、带箭头连接的过程图或泳道图；header/footer 表示页眉页脚；caption 表示图/表/公式/流程图/图片的标题、题注和解释说明；vision_footnote 表示单位、资料来源、注释和备注。
+- chart 和 flowchart 类型必须填写 description，用一两句概括图表或流程图表达的对象、指标、趋势、对比、流程节点、连接关系或主要信息；其他类型 description 必须为空字符串。
+- 不要把公式、图表、流程图、手写字、印章误标为 image 或 text；不要把流程图误标为 chart；不要把 caption、单位说明、资料来源并入主体块。
+- formula 表示数学/化学公式；chart 表示柱状图、折线图、饼图等数据图表主体，且 description 保存对图表内容的简要理解；flowchart 表示流程图主体，且 description 保存对流程节点和流转关系的简要理解；caption 表示图/表/公式/流程图/图片的标题、题注和解释说明；vision_footnote 表示单位、资料来源、注释和备注。
 - handwriting 表示手写字、手写签名、手写日期、手写批注等；seal 表示印章、签章、骑缝章等。
 """
 
 BLOCK_OUTPUT_KEYS = (
     "id",
     "text",
-    "chart_description",
+    "description",
     "bbox",
     "page_id",
     "block_type",
@@ -145,9 +145,9 @@ def make_output_blocks(blocks: list[Any]) -> list[dict[str, Any]]:
                 block[key] = str(raw_block.get("id") or f"b{index:03d}")
             elif key == "text":
                 block[key] = str(raw_block.get("text") or "")
-            elif key == "chart_description":
+            elif key == "description":
                 block_type = "table_of_contents" if raw_block.get("block_type") == "list" else str(raw_block.get("block_type") or "text")
-                block[key] = str(raw_block.get("chart_description") or "") if block_type == "chart" else ""
+                block[key] = str(raw_block.get("description") or raw_block.get("chart_description") or "") if block_type in {"chart", "flowchart"} else ""
             elif key == "page_id":
                 block[key] = int(raw_block.get("page_id") or 0)
             elif key == "level":

@@ -47,6 +47,7 @@ const BLOCK_TYPES: BackendBlockType[] = [
   'table',
   'formula',
   'chart',
+  'flowchart',
   'image',
   'vision_footnote',
   'header',
@@ -64,6 +65,7 @@ const BLOCK_TYPE_LABELS: Record<BackendBlockType, string> = {
   table: 'Table',
   formula: 'Formula',
   chart: 'Chart',
+  flowchart: 'Flowchart',
   image: 'Image',
   vision_footnote: 'Footnote',
   header: 'Header',
@@ -81,6 +83,7 @@ const DEFAULT_VISIBLE_TYPES: Record<BackendBlockType, boolean> = {
   table: true,
   formula: true,
   chart: true,
+  flowchart: true,
   image: true,
   vision_footnote: true,
   header: true,
@@ -331,7 +334,7 @@ export default function Workspace({
             clampPercent(((y2 - y1) / Math.max(page.height, 1)) * 100)
           ],
           text: block.text || `[${block.bbox?.join(', ') || 'bbox'}]`,
-          chartDescription: block.chart_description || '',
+          chartDescription: block.description || block.chart_description || '',
           confidence: 1,
           pageId: page.page_id,
           level: block.level || null,
@@ -1007,7 +1010,7 @@ export default function Workspace({
                         </div>
                         {seg.type === 'table' ? (
                           <div className="flex items-center gap-2 bg-surface-container p-2 rounded-[0.75rem] text-xs text-on-surface font-medium border border-outline-variant/30"><Table className="w-4 h-4 text-on-surface-variant" /><span className="truncate font-serif italic text-on-surface-variant">{seg.text}</span></div>
-                        ) : seg.type === 'chart' ? (
+                        ) : seg.type === 'chart' || seg.type === 'flowchart' ? (
                           <div className="space-y-1 rounded-[0.75rem] border border-outline-variant/30 bg-surface-container p-2 text-xs">
                             <p className="truncate font-serif italic text-on-surface-variant">{seg.text}</p>
                             {seg.chartDescription ? <p className="line-clamp-2 text-on-surface-variant">{seg.chartDescription}</p> : null}

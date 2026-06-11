@@ -102,16 +102,22 @@ def main() -> None:
     legacy_footnote_block = {"label": "footnote", "bbox": [0, 0, 10, 10]}
     legacy_other_block = {"label": "other", "bbox": [0, 0, 10, 10]}
     para_block = {"label": "paragraph_title", "level": "H3", "bbox": [0, 0, 10, 10]}
-    chart_block = {"label": "chart", "chart_description": "图表展示收入逐年上升", "bbox": [0, 0, 10, 10]}
+    chart_block = {"label": "chart", "description": "图表展示收入逐年上升", "bbox": [0, 0, 10, 10]}
+    legacy_chart_block = {"label": "chart", "chart_description": "旧字段图表描述", "bbox": [0, 0, 10, 10]}
+    flowchart_block = {"label": "flowchart", "description": "流程图展示审批流转", "bbox": [0, 0, 10, 10]}
     text_with_chart_description = {"label": "text", "chart_description": "不应保留", "bbox": [0, 0, 10, 10]}
     assert_true(normalize_annotation_block(doc_block, 0)["level"] is None, "标注保存时 doc_title 层级应清空")
     assert_true(job_block_from_annotation(caption_block)["level"] is None, "回写任务结果时非 paragraph_title 层级应清空")
     assert_true(normalize_annotation_block(legacy_figure_block, 0)["label"] == "caption", "旧 figure_title 应归一为 caption")
     assert_true(normalize_annotation_block(legacy_footnote_block, 0)["label"] == "vision_footnote", "旧 footnote 应归一为 vision_footnote")
     assert_true(normalize_annotation_block(legacy_other_block, 0)["label"] == "text", "旧 other 应归一为 text")
-    assert_true(normalize_annotation_block(chart_block, 0)["chart_description"] == "图表展示收入逐年上升", "chart 应保留 chart_description")
-    assert_true(normalize_annotation_block(text_with_chart_description, 0)["chart_description"] == "", "非 chart 应清空 chart_description")
-    assert_true(job_block_from_annotation(chart_block)["chart_description"] == "图表展示收入逐年上升", "回写任务结果时 chart_description 应保留")
+    assert_true(normalize_annotation_block(chart_block, 0)["description"] == "图表展示收入逐年上升", "chart 应保留 description")
+    assert_true(normalize_annotation_block(legacy_chart_block, 0)["description"] == "旧字段图表描述", "旧 chart_description 应兼容迁移到 description")
+    assert_true(normalize_annotation_block(flowchart_block, 0)["label"] == "flowchart", "flowchart 应作为合法 label 保留")
+    assert_true(normalize_annotation_block(flowchart_block, 0)["description"] == "流程图展示审批流转", "flowchart 应保留 description")
+    assert_true(job_block_from_annotation(flowchart_block)["block_type"] == "flowchart", "回写任务结果时 flowchart 应保留")
+    assert_true(normalize_annotation_block(text_with_chart_description, 0)["description"] == "", "非 chart/flowchart 应清空 description")
+    assert_true(job_block_from_annotation(chart_block)["description"] == "图表展示收入逐年上升", "回写任务结果时 description 应保留")
     assert_true(normalize_export_block(para_block)["level"] == "H3", "导出时 paragraph_title 层级应保留")
     collected = collect_done_blocks([{"blocks": [doc_block, para_block]}])
     assert_true(collected[0]["level"] is None and collected[1]["level"] == "H3", "聚合结果时只应保留 paragraph_title 层级")

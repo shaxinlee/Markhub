@@ -459,7 +459,7 @@ def normalize_blocks(
         bbox = scale_bbox(model_bbox, model_page, original_page)
 
         text = "" if raw.get("text") is None else str(raw.get("text"))
-        chart_description = str(raw.get("chart_description") or "") if block_type == "chart" else ""
+        description = str(raw.get("description") or raw.get("chart_description") or "") if block_type in {"chart", "flowchart"} else ""
         level = normalize_heading_level(raw.get("level"), block_type, text)
 
         block_no = len(blocks)
@@ -472,7 +472,7 @@ def normalize_blocks(
                 "model_bbox": model_bbox,
                 "page_id": original_page.page_id,
                 "block_type": block_type,
-                "chart_description": chart_description,
+                "description": description,
                 "level": level,
             }
         )
@@ -1279,7 +1279,7 @@ def normalize_annotation_block(block: Dict[str, Any], page_id: int) -> Dict[str,
         "label": label,
         "block_type": label,
         "text": str(block.get("text") or ""),
-        "chart_description": str(block.get("chart_description") or "") if label == "chart" else "",
+        "description": str(block.get("description") or block.get("chart_description") or "") if label in {"chart", "flowchart"} else "",
         "page_id": int(block.get("page_id") if block.get("page_id") is not None else page_id),
         "source": source,
         "modified": bool(block.get("modified", source == "manual")),
@@ -1378,7 +1378,7 @@ def job_block_from_annotation(block: Dict[str, Any]) -> Dict[str, Any]:
         "bbox": block.get("bbox", [0, 0, 1, 1]),
         "page_id": block.get("page_id", 0),
         "block_type": block_type,
-        "chart_description": str(block.get("chart_description") or "") if block_type == "chart" else "",
+        "description": str(block.get("description") or block.get("chart_description") or "") if block_type in {"chart", "flowchart"} else "",
         "level": normalize_stored_heading_level(block.get("level"), block_type),
     }
 
@@ -1805,7 +1805,7 @@ def normalize_export_block(block: Dict[str, Any], bbox_override: Optional[List[i
         "bbox": bbox_override if bbox_override is not None else block.get("bbox") if isinstance(block.get("bbox"), list) else [0, 0, 1, 1],
         "page_id": int(block.get("page_id") or 0),
         "block_type": label,
-        "chart_description": str(block.get("chart_description") or "") if label == "chart" else "",
+        "description": str(block.get("description") or block.get("chart_description") or "") if label in {"chart", "flowchart"} else "",
         "level": normalize_stored_heading_level(block.get("level"), label),
     }
 

@@ -107,7 +107,7 @@ def default_prompt_record() -> Dict[str, Any]:
     record = {
         "id": DEFAULT_PROMPT_TEMPLATE_ID,
         "name": "默认版面分析提示词",
-        "description": "系统内置的文档版面分析 Prompt，识别标题、正文、目录、表格、公式、图表、图片、页眉页脚、脚注、手写字和印章。",
+        "description": "系统内置的文档版面分析 Prompt，识别标题、正文、目录、表格、公式、图表、流程图、图片、页眉页脚、脚注、手写字和印章。",
         "type": "data_annotation",
         "task_type": "layout_analysis",
         "model_name": "all",
@@ -669,7 +669,7 @@ def _upgrade_builtin_default_prompt() -> None:
         # so manual edits to the default prompt survive restarts.
         if BUILTIN_LAYOUT_PROMPT_REVISION in notes:
             return
-        prompt["description"] = "系统内置的文档版面分析 Prompt，主动识别标题、正文、目录、表格、公式、图表、图片、页眉页脚、脚注、手写字和印章。"
+        prompt["description"] = "系统内置的文档版面分析 Prompt，主动识别标题、正文、目录、表格、公式、图表、流程图、图片、页眉页脚、脚注、手写字和印章。"
         prompt["content"] = LAYOUT_PROMPT
         prompt["variables"] = "输入为当前页面图片；模型必须逐类扫描并输出严格 JSON。"
         prompt["version"] = next_prompt_version(str(prompt.get("version") or "v1.0"))
