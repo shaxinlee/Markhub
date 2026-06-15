@@ -274,14 +274,18 @@ def coordinate_instruction(model_page: ModelPageImage, image_profile: str) -> st
     if image_profile == "qwen2_5":
         return (
             f"请输出当前 {model_page.width}x{model_page.height} 模型图像上的绝对像素 bbox，"
-            f"x 坐标范围为 0-{model_page.width}，y 坐标范围为 0-{model_page.height}，不要输出 0-1000 相对坐标。"
+            f"x 坐标范围为 0-{model_page.width}，y 坐标范围为 0-{model_page.height}，不要输出 0-1000 相对坐标；"
+            '最终 JSON 顶层必须包含 "coordinate_mode": "pixel"。'
         )
-    return "请严格输出 0-1000 相对坐标 bbox，不要输出像素坐标。"
+    return (
+        "请严格输出 0-1000 相对坐标 bbox，不要输出像素坐标；"
+        '最终 JSON 顶层必须包含 "coordinate_mode": "normalized_1000"。'
+    )
 
 
 def prompt_for_image_profile(prompt: str, model_page: ModelPageImage, image_profile: str) -> str:
     if image_profile != "qwen2_5":
-        return prompt
+        return prompt + "\n\n坐标格式确认（覆盖前文）：\n- " + coordinate_instruction(model_page, image_profile)
     adapted = prompt.replace(
         "bbox 必须使用 Qwen3-VL grounding 的 0–1000 相对坐标系，不要输出原始像素坐标。",
         "bbox 必须使用当前模型图像的绝对像素坐标，不要输出 0-1000 相对坐标。",
@@ -470,6 +474,55 @@ def extract_json_object_from(text: str, start: int) -> str:
 # Block / bbox normalization
 # --------------------------------------------------------------------------
 
+def bbox_coordinate_mode(payload: Dict[str, Any], raw_blocks: List[Any], model_page: ModelPageImage, image_profile: str) -> Tuple[str, Optional[str]]:
+    default_mode = "pixel" if image_profile == "qwen2_5" else "normalized_1000"
+    declared = str(
+        payload.get("coordinate_mode")
+        or payload.get("bbox_coordinate_mode")
+        or payload.get("coordinate_system")
+        or ""
+    ).strip().lower()
+    aliases = {
+        "pixel": "pixel",
+        "pixels": "pixel",
+        "absolute": "pixel",
+        "absolute_pixel": "pixel",
+        "absolute_pixels": "pixel",
+        "normalized": "normalized_1000",
+        "normalized_1000": "normalized_1000",
+        "relative": "normalized_1000",
+        "relative_1000": "normalized_1000",
+        "0-1000": "normalized_1000",
+    }
+    declared_mode = aliases.get(declared)
+    if declared_mode:
+        warning = None
+        if declared_mode != default_mode:
+            label = "像素坐标" if declared_mode == "pixel" else "0-1000 坐标"
+            warning = f"模型声明 coordinate_mode={declared!r}，与 {image_profile} 默认值不同，已按 {label}解析"
+        return declared_mode, warning
+
+    if default_mode == "normalized_1000":
+        for raw in raw_blocks:
+            if not isinstance(raw, dict):
+                continue
+            value = raw.get("bbox") if raw.get("bbox") is not None else raw.get("bbox_2d")
+            if not isinstance(value, (list, tuple)) or len(value) != 4:
+                continue
+            try:
+                x1, y1, x2, y2 = [float(item) for item in value]
+            except Exception:
+                continue
+            x_max = max(x1, x2)
+            y_max = max(y1, y2)
+            x_has_pixel_evidence = 1050 < x_max <= model_page.width * 1.05
+            y_has_pixel_evidence = 1050 < y_max <= model_page.height * 1.05
+            if x_has_pixel_evidence or y_has_pixel_evidence:
+                return "pixel", f"{image_profile} 返回值超出 0-1000，已自动按像素坐标解析"
+
+    return default_mode, None
+
+
 def normalize_blocks(
     payload: Dict[str, Any],
     model_page: ModelPageImage,
@@ -481,6 +534,10 @@ def normalize_blocks(
     warnings: List[str] = []
     if not isinstance(raw_blocks, list):
         return [], ["模型返回的 blocks 不是数组"]
+
+    coordinate_mode, mode_warning = bbox_coordinate_mode(payload, raw_blocks, model_page, image_profile)
+    if mode_warning:
+        warnings.append(f"page {original_page.page_id}: {mode_warning}")
 
     blocks: List[Dict[str, Any]] = []
     for raw_index, raw in enumerate(raw_blocks):
@@ -494,7 +551,7 @@ def normalize_blocks(
             continue
 
         raw_bbox = raw.get("bbox") if raw.get("bbox") is not None else raw.get("bbox_2d")
-        if image_profile == "qwen2_5":
+        if coordinate_mode == "pixel":
             model_bbox = normalize_bbox(raw_bbox, model_page.width, model_page.height)
             bbox_1000 = model_pixels_to_qwen_bbox(model_bbox, model_page) if model_bbox else None
         else:

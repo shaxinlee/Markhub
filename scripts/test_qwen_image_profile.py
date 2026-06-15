@@ -83,6 +83,40 @@ def main() -> int:
         assert "绝对像素坐标" in qwen25_prompt, "qwen2.5 提示词应要求绝对像素坐标"
         assert "必须使用 Qwen3-VL grounding" not in qwen25_prompt, "qwen2.5 提示词不应残留 Qwen3 坐标要求"
 
+        qwen3_pixel_blocks, qwen3_pixel_warnings = normalize_blocks(
+            {
+                "blocks": [
+                    {
+                        "block_type": "text",
+                        "text": "模型没有遵守 0-1000 提示词",
+                        "bbox": [
+                            round(qwen3.width * 0.1),
+                            round(qwen3.height * 0.1),
+                            round(qwen3.width * 0.9),
+                            round(qwen3.height * 0.9),
+                        ],
+                    }
+                ]
+            },
+            model_page=qwen3,
+            original_page=page,
+            image_profile="qwen3",
+        )
+        assert_equal(qwen3_pixel_blocks[0]["bbox"], [100, 200, 900, 1800], "Qwen3 返回像素坐标时应自动识别")
+        assert any("自动按像素坐标解析" in warning for warning in qwen3_pixel_warnings), "坐标模式切换应写入警告"
+
+        qwen25_normalized_blocks, qwen25_normalized_warnings = normalize_blocks(
+            {
+                "coordinate_mode": "normalized_1000",
+                "blocks": [{"block_type": "text", "text": "相对坐标", "bbox": [100, 100, 500, 500]}],
+            },
+            model_page=qwen25,
+            original_page=page,
+            image_profile="qwen2_5",
+        )
+        assert_equal(qwen25_normalized_blocks[0]["bbox"], [100, 200, 500, 1000], "显式坐标模式应覆盖模型默认值")
+        assert any("按 0-1000 坐标解析" in warning for warning in qwen25_normalized_warnings), "显式覆盖应写入警告"
+
     print("ok")
     return 0
 
