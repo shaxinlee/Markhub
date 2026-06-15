@@ -120,7 +120,7 @@ export default function Workspace({
   const [renderDpi, setRenderDpi] = useState('180');
   const [maxPages, setMaxPages] = useState('50');
   const [qwenPreset, setQwenPreset] = useState('default');
-  const [qwenImageProfile, setQwenImageProfile] = useState<'qwen3_6' | 'qwen3_5'>('qwen3_6');
+  const [qwenImageProfile, setQwenImageProfile] = useState<'qwen3_6' | 'qwen3_5' | 'qwen3'>('qwen3_6');
   const [qwenWidth, setQwenWidth] = useState('1536');
   const [qwenHeight, setQwenHeight] = useState('2176');
   const [promptTemplateId, setPromptTemplateId] = useState('default_template_1');
@@ -300,7 +300,11 @@ export default function Workspace({
       setRenderDpi(cfg.render_dpi || '180');
       setMaxPages(cfg.max_pages || '50');
       setQwenPreset(cfg.qwen_preset || 'default');
-      setQwenImageProfile(cfg.qwen_image_profile === 'qwen3_5' ? 'qwen3_5' : 'qwen3_6');
+      setQwenImageProfile(
+        cfg.qwen_image_profile === 'qwen3' || cfg.qwen_image_profile === 'qwen3_5'
+          ? cfg.qwen_image_profile
+          : 'qwen3_6'
+      );
       setQwenWidth(cfg.qwen_width || '1536');
       setQwenHeight(cfg.qwen_height || '2176');
       setPromptTemplateId(cfg.prompt_template_id || 'default_template_1');
@@ -474,6 +478,8 @@ export default function Workspace({
       setQwenImageProfile('qwen3_5');
     } else if (normalized.includes('qwen3.6') || normalized.includes('qwen3-6') || normalized.includes('qwen3_6')) {
       setQwenImageProfile('qwen3_6');
+    } else if (normalized.includes('qwen3')) {
+      setQwenImageProfile('qwen3');
     }
   };
 
@@ -744,9 +750,10 @@ export default function Workspace({
                 </label>
                 <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="Base URL" className="w-full rounded-[0.75rem] border border-outline-variant/50 bg-surface-container px-3 py-2.5 text-xs font-medium text-on-surface outline-none focus:border-primary" />
                 <input value={selectedModel} onChange={(e) => handleModelNameChange(e.target.value)} placeholder="Model name" className="w-full rounded-[0.75rem] border border-outline-variant/50 bg-surface-container px-3 py-2.5 text-xs font-medium text-on-surface outline-none focus:border-primary" />
-                <select value={qwenImageProfile} onChange={(e) => setQwenImageProfile(e.target.value === 'qwen3_5' ? 'qwen3_5' : 'qwen3_6')} className="w-full rounded-[0.75rem] border border-outline-variant/50 bg-surface-container px-3 py-2.5 text-xs font-medium text-on-surface outline-none focus:border-primary">
+                <select value={qwenImageProfile} onChange={(e) => setQwenImageProfile(e.target.value as 'qwen3_6' | 'qwen3_5' | 'qwen3')} className="w-full rounded-[0.75rem] border border-outline-variant/50 bg-surface-container px-3 py-2.5 text-xs font-medium text-on-surface outline-none focus:border-primary">
                   <option value="qwen3_6">Qwen3.6</option>
                   <option value="qwen3_5">Qwen3.5</option>
+                  <option value="qwen3">Qwen3-VL</option>
                 </select>
                 <div className="grid grid-cols-2 gap-2">
                   <input value={apiKey} onChange={(e) => setApiKey(e.target.value)} type="password" placeholder="API Key optional" className="w-full rounded-[0.75rem] border border-outline-variant/50 bg-surface-container px-3 py-2.5 text-xs font-medium text-on-surface outline-none focus:border-primary" />

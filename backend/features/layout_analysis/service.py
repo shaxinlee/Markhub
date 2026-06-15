@@ -157,7 +157,7 @@ def resize_page_for_model(page: PageImage, job_dir: Path, config: VisionResizeCo
     with Image.open(page.image_path) as image:
         image = image.convert("RGB")
         resampling = getattr(Image, "Resampling", Image).LANCZOS
-        if config.image_profile == "qwen3_5":
+        if config.image_profile in {"qwen3", "qwen3_5"}:
             target_w, target_h = smart_resize_dimensions(
                 page.width,
                 page.height,
@@ -315,11 +315,12 @@ def call_layout_llm(model_page: ModelPageImage, original_page: PageImage, config
     )
     content = completion.choices[0].message.content if completion.choices else ""
     model_input = {"system": prompt_template.prompt, "user": user_text}
-    return parse_model_json(content or ""), model_input, content or ""
+    cleaned_content = strip_think_prefix(content or "")
+    return parse_model_json(cleaned_content), model_input, cleaned_content
 
 
 def parse_model_json(content: str) -> Dict[str, Any]:
-    cleaned = content.strip()
+    cleaned = strip_think_prefix(content).strip()
     candidates: List[str] = []
     last_json_block = extract_last_json_code_block(cleaned)
     if last_json_block is not None:
@@ -351,6 +352,14 @@ def parse_model_json(content: str) -> Dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError("model response is not a JSON object")
     return payload
+
+
+def strip_think_prefix(content: str) -> str:
+    text = str(content or "")
+    matches = list(re.finditer(r"</think\s*>", text, flags=re.IGNORECASE))
+    if not matches:
+        return text
+    return text[matches[-1].end() :].lstrip()
 
 
 def strip_outer_code_fence(text: str) -> str:
@@ -915,7 +924,7 @@ def qna_entry_from_page(page_id: int, image_path: str, model_input: Dict[str, st
         "image": image_path,
         "system": str(model_input.get("system") or ""),
         "user": str(model_input.get("user") or ""),
-        "assistant": str(model_response or ""),
+        "assistant": strip_think_prefix(str(model_response or "")),
     }
 
 
@@ -1616,6 +1625,7 @@ def ensure_qna_entries_for_dataset(dataset_id: str, payload: Dict[str, Any]) -> 
 
 
 def assistant_content_for_training(assistant: str, image_ref: str) -> str:
+    assistant = strip_think_prefix(assistant)
     try:
         parsed = parse_model_json(assistant)
     except Exception:

@@ -1,23 +1,33 @@
 #!/usr/bin/env python3
-"""Evaluate model_pre annotations against ground_truth annotations.
+"""Evaluate layout-analysis predictions against ground-truth annotations.
 
 Expected data layout::
 
     evaluation/datasets/ground_truth/<job_id>.json  # second annotation
     evaluation/datasets/model_pre/<job_id>.json     # first annotation / model prediction
 
-For each ground-truth block, the evaluator finds the best model_pre bbox on the
-same page. A prediction is usable only when it covers enough of the GT bbox.
-Then the predicted label is compared with the GT label. Missing GT blocks count
-as errors for that GT label; unmatched predictions count as false positives.
+Documents are aligned by their original filename. Blocks are then matched
+one-to-one by geometry only, without looking at labels. This avoids inflating
+classification accuracy by choosing a lower-quality box merely because its
+label matches the answer.
+
+The default matching rule is IoU >= 0.5. The report separates:
+
+* detection precision/recall/F1;
+* label accuracy among geometrically matched blocks;
+* end-to-end precision/recall/F1, where a true positive needs both a valid
+  geometric match and the correct label.
 """
 
 from __future__ import annotations
 
 import argparse
+import difflib
 import json
 import os
-from collections import defaultdict
+import re
+import unicodedata
+from collections import Counter, defaultdict
 from typing import Any, Dict, List, Optional, Tuple
 
 
@@ -25,13 +35,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_DATASETS = os.path.join(HERE, "datasets")
 MISSING_LABEL = "__missing__"
 EXTRA_LABEL = "__extra__"
-MERGEABLE_LABELS = {"text"}
-RELAXED_COVERAGE_LABELS = {
-    "footer": 0.5,
-    "header": 0.5,
-    "seal": 0.6,
-    "vision_footnote": 0.5,
-}
+FAILED_PAGE_PATTERN = re.compile(r"第\s*(\d+)\s*页")
+DEFAULT_BBOX_EXEMPT_LABELS = ("footer",)
+DEFAULT_LABEL_ONLY_LABELS = ("header",)
 
 
 def normalize_label(block: Dict[str, Any]) -> str:
@@ -40,6 +46,39 @@ def normalize_label(block: Dict[str, Any]) -> str:
 
 def normalize_level(block: Dict[str, Any]) -> str:
     return str(block.get("level") or "none")
+
+
+def normalize_text(value: Any) -> str:
+    text = unicodedata.normalize("NFKC", str(value or "")).lower()
+    return "".join(character for character in text if character.isalnum())
+
+
+def text_group_coverage(
+    blocks: List[Dict[str, Any]],
+    other_blocks: List[Dict[str, Any]],
+) -> Tuple[float, float]:
+    def joined_text(items: List[Dict[str, Any]]) -> str:
+        ordered = sorted(
+            items,
+            key=lambda block: (
+                block["page_id"],
+                block["bbox"][1],
+                block["bbox"][0],
+                block["bbox"][3],
+                block["bbox"][2],
+            ),
+        )
+        return "".join(normalize_text(block.get("text")) for block in ordered)
+
+    text = joined_text(blocks)
+    other_text = joined_text(other_blocks)
+    if not text or not other_text:
+        return 0.0, 0.0
+    matcher = difflib.SequenceMatcher(None, text, other_text, autojunk=False)
+    sequence_common = sum(block.size for block in matcher.get_matching_blocks())
+    unordered_common = sum((Counter(text) & Counter(other_text)).values())
+    common = max(sequence_common, unordered_common)
+    return common / len(text), common / len(other_text)
 
 
 def normalize_bbox(value: Any) -> Optional[List[float]]:
@@ -86,36 +125,45 @@ def bbox_union_area(bboxes: List[List[float]]) -> float:
     xs = sorted({bbox[0] for bbox in bboxes} | {bbox[2] for bbox in bboxes})
     total = 0.0
     for left, right in zip(xs, xs[1:]):
-        if right <= left:
-            continue
-        intervals = []
-        for bbox in bboxes:
-            if bbox[0] < right and bbox[2] > left:
-                intervals.append((bbox[1], bbox[3]))
+        intervals = sorted(
+            (bbox[1], bbox[3])
+            for bbox in bboxes
+            if bbox[0] < right and bbox[2] > left
+        )
         if not intervals:
             continue
-        intervals.sort()
         covered = 0.0
-        cur_top, cur_bottom = intervals[0]
-        for top, bottom in intervals[1:]:
-            if top <= cur_bottom:
-                cur_bottom = max(cur_bottom, bottom)
+        top, bottom = intervals[0]
+        for next_top, next_bottom in intervals[1:]:
+            if next_top <= bottom:
+                bottom = max(bottom, next_bottom)
             else:
-                covered += cur_bottom - cur_top
-                cur_top, cur_bottom = top, bottom
-        covered += cur_bottom - cur_top
+                covered += bottom - top
+                top, bottom = next_top, next_bottom
+        covered += bottom - top
         total += (right - left) * covered
     return total
 
 
-def bbox_group_gt_coverage(gt_bbox: List[float], pred_bboxes: List[List[float]]) -> float:
+def bbox_coverage_by_group(bbox: List[float], other_bboxes: List[List[float]]) -> float:
     intersections = []
-    for pred_bbox in pred_bboxes:
-        intersection = bbox_intersection_box(gt_bbox, pred_bbox)
+    for other_bbox in other_bboxes:
+        intersection = bbox_intersection_box(bbox, other_bbox)
         if intersection is not None:
             intersections.append(intersection)
-    gt_area = bbox_area(gt_bbox)
-    return bbox_union_area(intersections) / gt_area if gt_area else 0.0
+    area = bbox_area(bbox)
+    return bbox_union_area(intersections) / area if area else 0.0
+
+
+def max_pairwise_overlap_ratio(bboxes: List[List[float]]) -> float:
+    maximum = 0.0
+    for index, bbox in enumerate(bboxes):
+        for other_bbox in bboxes[index + 1 :]:
+            smaller_area = min(bbox_area(bbox), bbox_area(other_bbox))
+            if not smaller_area:
+                continue
+            maximum = max(maximum, bbox_intersection(bbox, other_bbox) / smaller_area)
+    return maximum
 
 
 def bbox_metrics(gt_bbox: List[float], pred_bbox: List[float]) -> Tuple[float, float]:
@@ -126,38 +174,6 @@ def bbox_metrics(gt_bbox: List[float], pred_bbox: List[float]) -> Tuple[float, f
     gt_coverage = inter / gt_area if gt_area else 0.0
     iou = inter / union if union else 0.0
     return gt_coverage, iou
-
-
-def min_coverage_for_label(label: str, default_min_gt_coverage: float) -> float:
-    return min(default_min_gt_coverage, RELAXED_COVERAGE_LABELS.get(label, default_min_gt_coverage))
-
-
-def correct_prediction_indices(
-    gt_blocks: List[Dict[str, Any]],
-    pred_blocks: List[Dict[str, Any]],
-    matched: Dict[int, Tuple[int, float, float]],
-    used_pred: set,
-) -> set:
-    correct_pred = set()
-    correctly_matched_mergeable_gt = []
-    for gt_index, (pred_index, _coverage, _iou) in matched.items():
-        gt = gt_blocks[gt_index]
-        pred = pred_blocks[pred_index]
-        if pred["label"] != gt["label"]:
-            continue
-        correct_pred.add(pred_index)
-        if gt["label"] in MERGEABLE_LABELS:
-            correctly_matched_mergeable_gt.append(gt)
-
-    for pred_index in used_pred:
-        pred = pred_blocks[pred_index]
-        if pred["label"] not in MERGEABLE_LABELS:
-            continue
-        for gt in correctly_matched_mergeable_gt:
-            if pred["page_id"] == gt["page_id"] and bbox_intersection(gt["bbox"], pred["bbox"]) > 0:
-                correct_pred.add(pred_index)
-                break
-    return correct_pred
 
 
 def load_blocks(path: str) -> List[Dict[str, Any]]:
@@ -181,25 +197,65 @@ def load_blocks(path: str) -> List[Dict[str, Any]]:
                     "label": normalize_label(block),
                     "level": normalize_level(block),
                     "bbox": bbox,
+                    "text": str(block.get("text") or ""),
                 }
             )
     return blocks
 
 
+def annotation_key(path: str, data: Optional[Dict[str, Any]] = None) -> str:
+    if data is None:
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            data = {}
+
+    file_name = (
+        data.get("file_name")
+        or data.get("filename")
+        or data.get("document_name")
+        or data.get("name")
+    )
+    if isinstance(file_name, str) and file_name.strip():
+        return os.path.splitext(os.path.basename(file_name.strip()))[0]
+
+    stem = os.path.splitext(os.path.basename(path))[0]
+    if stem == "result" or stem.startswith("annotation_v2_"):
+        return os.path.basename(os.path.dirname(path))
+    return stem
+
+
+def add_annotation_file(files: Dict[str, str], key: str, path: str) -> None:
+    existing = files.get(key)
+    if existing and os.path.abspath(existing) != os.path.abspath(path):
+        raise ValueError(f"发现重复文档名 {key!r}: {existing} 与 {path}")
+    files[key] = path
+
+
 def json_files_by_job(root: str) -> Dict[str, str]:
     if not os.path.isdir(root):
         return {}
+    all_json = []
+    result_json = []
+    for current_root, _dirs, names in os.walk(root):
+        for name in sorted(names):
+            if not name.endswith(".json") or name == "dataset_state.json":
+                continue
+            path = os.path.join(current_root, name)
+            all_json.append(path)
+            if name == "result.json":
+                result_json.append(path)
+
     files: Dict[str, str] = {}
-    for name in sorted(os.listdir(root)):
-        path = os.path.join(root, name)
-        if os.path.isfile(path) and name.endswith(".json"):
-            files[os.path.splitext(name)[0]] = path
-            continue
-        if os.path.isdir(path):
-            candidates = sorted(item for item in os.listdir(path) if item.endswith(".json"))
-            if candidates:
-                files[name] = os.path.join(path, candidates[-1])
+    for path in result_json or all_json:
+        add_annotation_file(files, annotation_key(path), path)
     return files
+
+
+def job_id_from_annotation_file(path: str) -> str:
+    """Backward-compatible alias for callers that used the old helper name."""
+    return annotation_key(path)
 
 
 def discover_first_annotation_files(root: str) -> Dict[str, str]:
@@ -211,8 +267,7 @@ def discover_first_annotation_files(root: str) -> Dict[str, str]:
         if "result.json" not in names:
             continue
         path = os.path.join(current_root, "result.json")
-        job_id = os.path.basename(current_root)
-        files[job_id] = path
+        add_annotation_file(files, annotation_key(path), path)
     return dict(sorted(files.items()))
 
 
@@ -231,16 +286,188 @@ def discover_second_annotation_files(root: str) -> Dict[str, str]:
             if name.startswith("annotation_v2_") and name.endswith(".json")
         )
         if candidates:
-            files[job_id] = candidates[-1]
+            path = candidates[-1]
+            add_annotation_file(files, annotation_key(path), path)
     return files
+
+
+def discover_failed_pages(root: str) -> Dict[str, set]:
+    """Return zero-based failed page ids keyed by original document name."""
+    failed_pages: Dict[str, set] = defaultdict(set)
+    for path in discover_first_annotation_files(root).values():
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        job_id = annotation_key(path, data)
+        for error in data.get("errors") or []:
+            match = FAILED_PAGE_PATTERN.search(str(error))
+            if match:
+                failed_pages[job_id].add(int(match.group(1)) - 1)
+    return dict(failed_pages)
+
+
+def merge_failed_pages(*page_maps: Dict[str, set]) -> Dict[str, set]:
+    merged: Dict[str, set] = defaultdict(set)
+    for page_map in page_maps:
+        for job_id, page_ids in page_map.items():
+            merged[job_id].update(page_ids)
+    return dict(merged)
+
+
+def filter_excluded_pages(blocks: List[Dict[str, Any]], excluded_pages: set) -> List[Dict[str, Any]]:
+    if not excluded_pages:
+        return blocks
+    return [block for block in blocks if block["page_id"] not in excluded_pages]
+
+
+def region_correct_indices(
+    gt_blocks: List[Dict[str, Any]],
+    pred_blocks: List[Dict[str, Any]],
+    min_region_coverage: float = 0.8,
+    min_iou: float = 0.5,
+    key_fields: Tuple[str, ...] = ("label",),
+    excluded_labels: Tuple[str, ...] = (),
+) -> Tuple[set, set]:
+    """Match equivalent same-class content while allowing shifted/split/merge layouts.
+
+    Geometry remains the first link between blocks, but complete text content
+    can validate a component even when its boxes are shifted, split, merged, or
+    contain layout whitespace.
+    """
+    validate_threshold("min_region_coverage", min_region_coverage)
+    validate_threshold("min_iou", min_iou)
+
+    gt_groups: Dict[Tuple[Any, ...], List[int]] = defaultdict(list)
+    pred_groups: Dict[Tuple[Any, ...], List[int]] = defaultdict(list)
+    for index, block in enumerate(gt_blocks):
+        if block["label"] in excluded_labels:
+            continue
+        key = (block["page_id"], *(block[field] for field in key_fields))
+        gt_groups[key].append(index)
+    for index, block in enumerate(pred_blocks):
+        if block["label"] in excluded_labels:
+            continue
+        key = (block["page_id"], *(block[field] for field in key_fields))
+        pred_groups[key].append(index)
+
+    correct_gt = set()
+    correct_pred = set()
+    for key in sorted(set(gt_groups) & set(pred_groups), key=str):
+        gt_indices = gt_groups[key]
+        pred_indices = pred_groups[key]
+        adjacency: Dict[Tuple[str, int], List[Tuple[str, int]]] = defaultdict(list)
+        for gt_index in gt_indices:
+            for pred_index in pred_indices:
+                if bbox_intersection(gt_blocks[gt_index]["bbox"], pred_blocks[pred_index]["bbox"]) <= 0:
+                    continue
+                adjacency[("gt", gt_index)].append(("pred", pred_index))
+                adjacency[("pred", pred_index)].append(("gt", gt_index))
+
+        visited = set()
+        for node in list(adjacency):
+            if node in visited:
+                continue
+            stack = [node]
+            visited.add(node)
+            component_gt = []
+            component_pred = []
+            while stack:
+                side, index = stack.pop()
+                if side == "gt":
+                    component_gt.append(index)
+                else:
+                    component_pred.append(index)
+                for neighbor in adjacency[(side, index)]:
+                    if neighbor not in visited:
+                        visited.add(neighbor)
+                        stack.append(neighbor)
+
+            gt_bboxes = [gt_blocks[index]["bbox"] for index in component_gt]
+            pred_bboxes = [pred_blocks[index]["bbox"] for index in component_pred]
+            gt_component = [gt_blocks[index] for index in component_gt]
+            pred_component = [pred_blocks[index] for index in component_pred]
+            gt_text_coverage, pred_text_coverage = text_group_coverage(
+                gt_component,
+                pred_component,
+            )
+            if min(gt_text_coverage, pred_text_coverage) >= min_region_coverage:
+                correct_gt.update(component_gt)
+                correct_pred.update(component_pred)
+                continue
+            if (
+                len(component_gt) == 1
+                and len(component_pred) == 1
+                and gt_text_coverage >= 0.9
+            ):
+                correct_gt.update(component_gt)
+                correct_pred.update(component_pred)
+                continue
+            if len(component_gt) == 1 and len(component_pred) == 1:
+                continue
+            if max_pairwise_overlap_ratio(gt_bboxes) > 0.5:
+                continue
+            if max_pairwise_overlap_ratio(pred_bboxes) > 0.5:
+                continue
+            gt_coverages = [
+                bbox_coverage_by_group(gt_blocks[index]["bbox"], pred_bboxes)
+                for index in component_gt
+            ]
+            pred_coverages = [
+                bbox_coverage_by_group(pred_blocks[index]["bbox"], gt_bboxes)
+                for index in component_pred
+            ]
+            if min(gt_coverages + pred_coverages) >= min_region_coverage:
+                correct_gt.update(component_gt)
+                correct_pred.update(component_pred)
+
+    return correct_gt, correct_pred
+
+
+def label_only_matches(
+    gt_blocks: List[Dict[str, Any]],
+    pred_blocks: List[Dict[str, Any]],
+    labels: Tuple[str, ...],
+) -> Tuple[Dict[int, Tuple[int, float, float]], set, set]:
+    """Pair selected labels by page and label without applying bbox thresholds."""
+    gt_groups: Dict[Tuple[int, str], List[int]] = defaultdict(list)
+    pred_groups: Dict[Tuple[int, str], List[int]] = defaultdict(list)
+    label_set = set(labels)
+    for index, block in enumerate(gt_blocks):
+        if block["label"] in label_set:
+            gt_groups[(block["page_id"], block["label"])].append(index)
+    for index, block in enumerate(pred_blocks):
+        if block["label"] in label_set:
+            pred_groups[(block["page_id"], block["label"])].append(index)
+
+    matched: Dict[int, Tuple[int, float, float]] = {}
+    used_gt = set()
+    used_pred = set()
+    for key in sorted(set(gt_groups) & set(pred_groups)):
+        gt_indices = sorted(gt_groups[key], key=lambda index: tuple(gt_blocks[index]["bbox"]))
+        pred_indices = sorted(pred_groups[key], key=lambda index: tuple(pred_blocks[index]["bbox"]))
+        for gt_index, pred_index in zip(gt_indices, pred_indices):
+            coverage, iou = bbox_metrics(gt_blocks[gt_index]["bbox"], pred_blocks[pred_index]["bbox"])
+            matched[gt_index] = (pred_index, coverage, iou)
+            used_gt.add(gt_index)
+            used_pred.add(pred_index)
+    return matched, used_gt, used_pred
 
 
 def evaluate_file_maps(
     gt_files: Dict[str, str],
     pred_files: Dict[str, str],
-    min_gt_coverage: float = 0.8,
-    min_iou: float = 0.0,
+    min_gt_coverage: Optional[float] = None,
+    min_iou: float = 0.5,
+    min_region_coverage: float = 0.8,
+    excluded_pages: Optional[Dict[str, set]] = None,
+    bbox_exempt_labels: Tuple[str, ...] = DEFAULT_BBOX_EXEMPT_LABELS,
+    label_only_labels: Tuple[str, ...] = DEFAULT_LABEL_ONLY_LABELS,
 ) -> Dict[str, Any]:
+    validate_threshold("min_iou", min_iou)
+    validate_threshold("min_region_coverage", min_region_coverage)
+    if min_gt_coverage is not None:
+        validate_threshold("min_gt_coverage", min_gt_coverage)
+    excluded_pages = excluded_pages or {}
+
     support = defaultdict(int)
     correct = defaultdict(int)
     predicted = defaultdict(int)
@@ -261,23 +488,107 @@ def evaluate_file_maps(
     total_gt = 0
     total_matched = 0
     total_correct = 0
+    total_pred_correct = 0
+    total_strict_label_correct = 0
     missing = 0
     extra = 0
-    bbox_too_small = 0
+    excluded_page_count = 0
     job_rows = []
     skipped = []
 
     for job_id in sorted(gt_files):
         gt_path = gt_files[job_id]
         pred_path = pred_files.get(job_id)
-        if not pred_path:
-            skipped.append((job_id, "找不到对应 model_pre/一次标注"))
-            continue
 
-        gt_blocks = load_blocks(gt_path)
-        pred_blocks = load_blocks(pred_path)
-        matched, used_gt, used_pred = match_blocks(gt_blocks, pred_blocks, min_gt_coverage, min_iou)
-        correct_pred = correct_prediction_indices(gt_blocks, pred_blocks, matched, used_pred)
+        job_excluded_pages = excluded_pages.get(job_id, set())
+        gt_blocks = filter_excluded_pages(load_blocks(gt_path), job_excluded_pages)
+        pred_blocks = (
+            filter_excluded_pages(load_blocks(pred_path), job_excluded_pages)
+            if pred_path
+            else []
+        )
+        excluded_page_count += len(job_excluded_pages)
+        if not pred_path:
+            skipped.append((job_id, "找不到对应预测，整份文档按漏检计入"))
+        label_matches, _label_used_gt, label_used_pred = label_only_matches(
+            gt_blocks,
+            pred_blocks,
+            tuple(dict.fromkeys((*bbox_exempt_labels, *label_only_labels))),
+        )
+        bbox_exempt_label_set = set(bbox_exempt_labels)
+        geometry_exempt_label_set = bbox_exempt_label_set | set(label_only_labels)
+        bbox_exempt_gt = {
+            index for index, block in enumerate(gt_blocks)
+            if block["label"] in bbox_exempt_label_set
+        }
+        bbox_exempt_pred = {
+            index for index, block in enumerate(pred_blocks)
+            if block["label"] in bbox_exempt_label_set
+        }
+        geometry_exempt_gt = {
+            index for index, block in enumerate(gt_blocks)
+            if block["label"] in geometry_exempt_label_set
+        }
+        geometry_exempt_pred = {
+            index for index, block in enumerate(pred_blocks)
+            if block["label"] in geometry_exempt_label_set
+        }
+        matched, _used_gt, used_pred = match_blocks(
+            gt_blocks,
+            pred_blocks,
+            min_iou=min_iou,
+            min_gt_coverage=min_gt_coverage,
+            excluded_gt_indices=geometry_exempt_gt,
+            excluded_pred_indices=geometry_exempt_pred,
+        )
+        matched.update(label_matches)
+        used_pred.update(label_used_pred)
+        grouped_correct_gt, grouped_correct_pred = region_correct_indices(
+            gt_blocks,
+            pred_blocks,
+            min_region_coverage=min_region_coverage,
+            min_iou=min_iou,
+            key_fields=("label",),
+            excluded_labels=tuple(geometry_exempt_label_set),
+        )
+        grouped_level_gt, grouped_level_pred = region_correct_indices(
+            gt_blocks,
+            pred_blocks,
+            min_region_coverage=min_region_coverage,
+            min_iou=min_iou,
+            key_fields=("label", "level"),
+            excluded_labels=tuple(geometry_exempt_label_set),
+        )
+        strict_label_correct = sum(
+            gt_blocks[gt_index]["label"] == pred_blocks[pred_index]["label"]
+            for gt_index, (pred_index, _coverage, _iou) in matched.items()
+        )
+        strict_correct_gt = {
+            gt_index
+            for gt_index, (pred_index, _coverage, _iou) in matched.items()
+            if gt_blocks[gt_index]["label"] == pred_blocks[pred_index]["label"]
+        }
+        strict_correct_pred = {
+            pred_index
+            for gt_index, (pred_index, _coverage, _iou) in matched.items()
+            if gt_blocks[gt_index]["label"] == pred_blocks[pred_index]["label"]
+        }
+        strict_level_gt = {
+            gt_index
+            for gt_index, (pred_index, _coverage, _iou) in matched.items()
+            if gt_blocks[gt_index]["label"] == pred_blocks[pred_index]["label"]
+            and gt_blocks[gt_index]["level"] == pred_blocks[pred_index]["level"]
+        }
+        strict_level_pred = {
+            pred_index
+            for gt_index, (pred_index, _coverage, _iou) in matched.items()
+            if gt_blocks[gt_index]["label"] == pred_blocks[pred_index]["label"]
+            and gt_blocks[gt_index]["level"] == pred_blocks[pred_index]["level"]
+        }
+        correct_gt = strict_correct_gt | grouped_correct_gt | bbox_exempt_gt
+        correct_pred = strict_correct_pred | grouped_correct_pred | bbox_exempt_pred
+        correct_level_gt = strict_level_gt | grouped_level_gt | bbox_exempt_gt
+        correct_level_pred = strict_level_pred | grouped_level_pred | bbox_exempt_pred
 
         for pred_index, pred in enumerate(pred_blocks):
             pred_label = pred["label"]
@@ -288,11 +599,13 @@ def evaluate_file_maps(
                 para_lvl_predicted[pred_level] += 1
             if pred_index in correct_pred:
                 pred_correct[pred_label] += 1
+            if pred_index in correct_level_pred:
                 lvl_pred_correct[pred_level] += 1
                 if pred_label == "paragraph_title":
                     para_lvl_pred_correct[pred_level] += 1
 
         job_correct = 0
+        job_pred_correct = len(correct_pred)
         job_missing = 0
         for gt_index, gt in enumerate(gt_blocks):
             gt_label = gt["label"]
@@ -301,38 +614,41 @@ def evaluate_file_maps(
             lvl_support[gt_level] += 1
             if gt_label == "paragraph_title":
                 para_lvl_support[gt_level] += 1
-            if gt_index not in matched:
-                missing += 1
-                job_missing += 1
-                confusion[(gt_label, MISSING_LABEL)] += 1
-                lvl_confusion[(gt_level, MISSING_LABEL)] += 1
-                if gt_label == "paragraph_title":
-                    para_lvl_confusion[(gt_level, MISSING_LABEL)] += 1
-                continue
-
-            pred_index, coverage, _iou = matched[gt_index]
-            pred = pred_blocks[pred_index]
-            pred_label = pred["label"]
-            pred_level = pred["level"]
-            if pred_label == gt_label:
+            if gt_index in correct_gt:
                 correct[gt_label] += 1
                 total_correct += 1
                 job_correct += 1
+            elif gt_index not in matched:
+                missing += 1
+                job_missing += 1
+                confusion[(gt_label, MISSING_LABEL)] += 1
             else:
-                confusion[(gt_label, pred_label)] += 1
-            if pred_level == gt_level:
+                pred_index, _coverage, _iou = matched[gt_index]
+                pred = pred_blocks[pred_index]
+                confusion[(gt_label, pred["label"])] += 1
+
+            if gt_index in correct_level_gt:
                 lvl_correct[gt_level] += 1
             else:
-                lvl_confusion[(gt_level, pred_level)] += 1
+                if gt_index in matched:
+                    pred_index, _coverage, _iou = matched[gt_index]
+                    pred = pred_blocks[pred_index]
+                    level_value = pred["level"] if pred["label"] == gt_label else pred["label"]
+                else:
+                    level_value = MISSING_LABEL
+                lvl_confusion[(gt_level, level_value)] += 1
             if gt_label == "paragraph_title":
-                if pred_label == "paragraph_title" and pred_level == gt_level:
+                if gt_index in correct_level_gt:
                     para_lvl_correct[gt_level] += 1
                 else:
-                    para_lvl_confusion[(gt_level, pred_level if pred_label == "paragraph_title" else pred_label)] += 1
-            if coverage < 1.0:
-                bbox_too_small += 1
-
-        unmatched_pred = set(range(len(pred_blocks))) - used_pred
+                    if gt_index in matched:
+                        pred_index, _coverage, _iou = matched[gt_index]
+                        pred = pred_blocks[pred_index]
+                        level_value = pred["level"] if pred["label"] == "paragraph_title" else pred["label"]
+                    else:
+                        level_value = MISSING_LABEL
+                    para_lvl_confusion[(gt_level, level_value)] += 1
+        unmatched_pred = set(range(len(pred_blocks))) - used_pred - correct_pred
         for pred_index in unmatched_pred:
             pred = pred_blocks[pred_index]
             confusion[(EXTRA_LABEL, pred["label"])] += 1
@@ -342,13 +658,20 @@ def evaluate_file_maps(
 
         total_gt += len(gt_blocks)
         total_matched += len(matched)
+        total_pred_correct += len(correct_pred)
+        total_strict_label_correct += strict_label_correct
         extra += len(unmatched_pred)
         job_rows.append(
             {
                 "job_id": job_id,
                 "gt": len(gt_blocks),
+                "predicted": len(pred_blocks),
                 "matched": len(matched),
                 "correct": job_correct,
+                "pred_correct": job_pred_correct,
+                "detection_recall": len(matched) / len(gt_blocks) if gt_blocks else 0.0,
+                "classification_accuracy": strict_label_correct / len(matched) if matched else 0.0,
+                "end_to_end_recall": job_correct / len(gt_blocks) if gt_blocks else 0.0,
                 "recall": job_correct / len(gt_blocks) if gt_blocks else 0.0,
                 "missing": job_missing,
                 "extra": len(unmatched_pred),
@@ -356,7 +679,18 @@ def evaluate_file_maps(
         )
 
     for job_id in sorted(set(pred_files) - set(gt_files)):
-        skipped.append((job_id, "model_pre/一次标注没有对应 ground_truth/二次标注"))
+        pred_blocks = filter_excluded_pages(
+            load_blocks(pred_files[job_id]),
+            excluded_pages.get(job_id, set()),
+        )
+        for pred in pred_blocks:
+            predicted[pred["label"]] += 1
+            lvl_predicted[pred["level"]] += 1
+            if pred["label"] == "paragraph_title":
+                para_lvl_predicted[pred["level"]] += 1
+            confusion[(EXTRA_LABEL, pred["label"])] += 1
+        extra += len(pred_blocks)
+        skipped.append((job_id, "预测没有对应 ground_truth，整份文档按误检计入"))
 
     return {
         "support": support,
@@ -377,123 +711,104 @@ def evaluate_file_maps(
         "total_gt": total_gt,
         "total_matched": total_matched,
         "total_correct": total_correct,
+        "total_pred_correct": total_pred_correct,
+        "total_strict_label_correct": total_strict_label_correct,
         "missing": missing,
         "extra": extra,
-        "bbox_too_small": bbox_too_small,
+        "excluded_page_count": excluded_page_count,
         "job_rows": job_rows,
         "skipped": skipped,
         "min_gt_coverage": min_gt_coverage,
         "min_iou": min_iou,
+        "min_region_coverage": min_region_coverage,
+        "bbox_exempt_labels": bbox_exempt_labels,
+        "label_only_labels": label_only_labels,
     }
 
 
 def evaluate_annotation_roots(
     ground_truth_root: str,
     model_pre_root: str,
-    min_gt_coverage: float = 0.8,
-    min_iou: float = 0.0,
+    min_gt_coverage: Optional[float] = None,
+    min_iou: float = 0.5,
+    min_region_coverage: float = 0.8,
+    excluded_pages: Optional[Dict[str, set]] = None,
+    bbox_exempt_labels: Tuple[str, ...] = DEFAULT_BBOX_EXEMPT_LABELS,
+    label_only_labels: Tuple[str, ...] = DEFAULT_LABEL_ONLY_LABELS,
 ) -> Dict[str, Any]:
     gt_files = discover_second_annotation_files(ground_truth_root) or json_files_by_job(ground_truth_root)
     pred_files = discover_first_annotation_files(model_pre_root) or json_files_by_job(model_pre_root)
-    return evaluate_file_maps(gt_files, pred_files, min_gt_coverage=min_gt_coverage, min_iou=min_iou)
+    result = evaluate_file_maps(
+        gt_files,
+        pred_files,
+        min_gt_coverage=min_gt_coverage,
+        min_iou=min_iou,
+        min_region_coverage=min_region_coverage,
+        excluded_pages=excluded_pages,
+        bbox_exempt_labels=bbox_exempt_labels,
+        label_only_labels=label_only_labels,
+    )
+
+    category_jobs: Dict[str, List[str]] = defaultdict(list)
+    for job_id, path in gt_files.items():
+        relative_parts = os.path.relpath(path, ground_truth_root).split(os.sep)
+        filename = os.path.basename(path)
+        if len(relative_parts) >= 2 and not filename.startswith("annotation_v2_"):
+            category_jobs[relative_parts[0]].append(job_id)
+        else:
+            category_jobs["all"].append(job_id)
+
+    if set(category_jobs) != {"all"}:
+        result["by_category"] = {}
+        for category, job_ids in sorted(category_jobs.items()):
+            result["by_category"][category] = evaluate_file_maps(
+                {job_id: gt_files[job_id] for job_id in job_ids},
+                {job_id: pred_files[job_id] for job_id in job_ids if job_id in pred_files},
+                min_gt_coverage=min_gt_coverage,
+                min_iou=min_iou,
+                min_region_coverage=min_region_coverage,
+                excluded_pages=excluded_pages,
+                bbox_exempt_labels=bbox_exempt_labels,
+                label_only_labels=label_only_labels,
+            )
+    return result
 
 
 def match_blocks(
     gt_blocks: List[Dict[str, Any]],
     pred_blocks: List[Dict[str, Any]],
-    min_gt_coverage: float,
-    min_iou: float,
+    min_gt_coverage: Optional[float] = None,
+    min_iou: float = 0.5,
+    excluded_gt_indices: Optional[set] = None,
+    excluded_pred_indices: Optional[set] = None,
 ) -> Tuple[Dict[int, Tuple[int, float, float]], set, set]:
+    """Greedily match highest-IoU boxes one-to-one, independent of label."""
+    excluded_gt_indices = excluded_gt_indices or set()
+    excluded_pred_indices = excluded_pred_indices or set()
     preds_by_page: Dict[int, List[Tuple[int, Dict[str, Any]]]] = defaultdict(list)
     for pred_index, pred in enumerate(pred_blocks):
+        if pred_index in excluded_pred_indices:
+            continue
         preds_by_page[pred["page_id"]].append((pred_index, pred))
 
-    same_label_candidates: List[Tuple[float, float, int, int]] = []
-    cross_label_candidates: List[Tuple[float, float, int, int]] = []
+    candidates: List[Tuple[float, float, int, int]] = []
     for gt_index, gt in enumerate(gt_blocks):
-        if gt["label"] in MERGEABLE_LABELS:
+        if gt_index in excluded_gt_indices:
             continue
-        gt_min_coverage = min_coverage_for_label(gt["label"], min_gt_coverage)
         for pred_index, pred in preds_by_page.get(gt["page_id"], []):
             coverage, iou = bbox_metrics(gt["bbox"], pred["bbox"])
-            if coverage >= gt_min_coverage and iou >= min_iou:
-                if pred["label"] == gt["label"]:
-                    same_label_candidates.append((coverage, iou, gt_index, pred_index))
-                else:
-                    cross_label_candidates.append((coverage, iou, gt_index, pred_index))
+            if iou < min_iou:
+                continue
+            if min_gt_coverage is not None and coverage < min_gt_coverage:
+                continue
+            candidates.append((iou, coverage, gt_index, pred_index))
 
     matched: Dict[int, Tuple[int, float, float]] = {}
     used_gt: set = set()
     used_pred: set = set()
 
-    same_label_candidates.sort(reverse=True)
-    for coverage, iou, gt_index, pred_index in same_label_candidates:
-        if gt_index in used_gt or pred_index in used_pred:
-            continue
-        matched[gt_index] = (pred_index, coverage, iou)
-        used_gt.add(gt_index)
-        used_pred.add(pred_index)
-
-    cross_label_candidates.sort(reverse=True)
-    for coverage, iou, gt_index, pred_index in cross_label_candidates:
-        if gt_index in used_gt or pred_index in used_pred:
-            continue
-        matched[gt_index] = (pred_index, coverage, iou)
-        used_gt.add(gt_index)
-        used_pred.add(pred_index)
-
-    used_pred_by_fixed_label = {
-        pred_index
-        for pred_index in used_pred
-        if pred_blocks[pred_index]["label"] not in MERGEABLE_LABELS
-    }
-
-    for gt_index, gt in enumerate(gt_blocks):
-        if gt_index in used_gt or gt["label"] not in MERGEABLE_LABELS:
-            continue
-
-        gt_min_coverage = min_coverage_for_label(gt["label"], min_gt_coverage)
-        same_label_preds = [
-            (pred_index, pred)
-            for pred_index, pred in preds_by_page.get(gt["page_id"], [])
-            if pred["label"] == gt["label"]
-            and pred_index not in used_pred_by_fixed_label
-            and bbox_intersection(gt["bbox"], pred["bbox"]) > 0
-        ]
-        if not same_label_preds:
-            continue
-
-        coverage = bbox_group_gt_coverage(
-            gt["bbox"],
-            [pred["bbox"] for _pred_index, pred in same_label_preds],
-        )
-        if coverage < gt_min_coverage:
-            continue
-
-        primary_pred_index, primary_pred = max(
-            same_label_preds,
-            key=lambda item: bbox_metrics(gt["bbox"], item[1]["bbox"]),
-        )
-        _single_coverage, iou = bbox_metrics(gt["bbox"], primary_pred["bbox"])
-        matched[gt_index] = (primary_pred_index, coverage, iou)
-        used_gt.add(gt_index)
-        for pred_index, _pred in same_label_preds:
-            used_pred.add(pred_index)
-
-    mergeable_fallback_candidates: List[Tuple[float, float, int, int]] = []
-    for gt_index, gt in enumerate(gt_blocks):
-        if gt_index in used_gt or gt["label"] not in MERGEABLE_LABELS:
-            continue
-        gt_min_coverage = min_coverage_for_label(gt["label"], min_gt_coverage)
-        for pred_index, pred in preds_by_page.get(gt["page_id"], []):
-            if pred_index in used_pred or pred["label"] in MERGEABLE_LABELS:
-                continue
-            coverage, iou = bbox_metrics(gt["bbox"], pred["bbox"])
-            if coverage >= gt_min_coverage and iou >= min_iou:
-                mergeable_fallback_candidates.append((coverage, iou, gt_index, pred_index))
-
-    mergeable_fallback_candidates.sort(reverse=True)
-    for coverage, iou, gt_index, pred_index in mergeable_fallback_candidates:
+    candidates.sort(reverse=True)
+    for iou, coverage, gt_index, pred_index in candidates:
         if gt_index in used_gt or pred_index in used_pred:
             continue
         matched[gt_index] = (pred_index, coverage, iou)
@@ -502,19 +817,42 @@ def match_blocks(
     return matched, used_gt, used_pred
 
 
-def evaluate(datasets_dir: str, min_gt_coverage: float = 0.8, min_iou: float = 0.0) -> Dict[str, Any]:
+def evaluate(
+    datasets_dir: str,
+    prediction_dir: str = "qwen3.6-27b",
+    min_gt_coverage: Optional[float] = None,
+    min_iou: float = 0.5,
+    min_region_coverage: float = 0.8,
+    excluded_pages: Optional[Dict[str, set]] = None,
+    bbox_exempt_labels: Tuple[str, ...] = DEFAULT_BBOX_EXEMPT_LABELS,
+    label_only_labels: Tuple[str, ...] = DEFAULT_LABEL_ONLY_LABELS,
+) -> Dict[str, Any]:
     gt_root = os.path.join(datasets_dir, "ground_truth")
-    pred_root = os.path.join(datasets_dir, "model_pre")
+    pred_root = prediction_dir if os.path.isabs(prediction_dir) else os.path.join(datasets_dir, prediction_dir)
     if not os.path.isdir(gt_root):
         raise SystemExit(f"找不到 ground_truth 目录: {gt_root}")
     if not os.path.isdir(pred_root):
-        raise SystemExit(f"找不到 model_pre 目录: {pred_root}")
+        raise SystemExit(f"找不到预测目录: {pred_root}")
 
-    return evaluate_annotation_roots(gt_root, pred_root, min_gt_coverage=min_gt_coverage, min_iou=min_iou)
+    return evaluate_annotation_roots(
+        gt_root,
+        pred_root,
+        min_gt_coverage=min_gt_coverage,
+        min_iou=min_iou,
+        min_region_coverage=min_region_coverage,
+        excluded_pages=excluded_pages,
+        bbox_exempt_labels=bbox_exempt_labels,
+        label_only_labels=label_only_labels,
+    )
 
 
 def f1_score(precision: float, recall: float) -> float:
     return 2 * precision * recall / (precision + recall) if precision + recall else 0.0
+
+
+def validate_threshold(name: str, value: float) -> None:
+    if not 0.0 <= value <= 1.0:
+        raise ValueError(f"{name} 必须在 0 到 1 之间，当前值: {value}")
 
 
 def level_sort_key(level: str) -> Tuple[int, int, str]:
@@ -527,16 +865,28 @@ def level_sort_key(level: str) -> Tuple[int, int, str]:
 
 def print_report(r: Dict[str, Any]) -> None:
     print("=" * 92)
-    print("按 bbox + label 的准确率评估 (model_pre=预测, ground_truth=标准答案)")
+    print("版面分析评估 (几何匹配与标签评估解耦)")
     print("=" * 92)
-    print(f"匹配阈值: GT bbox 覆盖率 >= {r['min_gt_coverage']:.0%}, IoU >= {r['min_iou']:.2f}")
+    threshold = f"IoU >= {r['min_iou']:.2f}"
+    if r["min_gt_coverage"] is not None:
+        threshold += f", GT bbox 覆盖率 >= {r['min_gt_coverage']:.0%}"
+    print(
+        f"检测阈值: {threshold}；label 指标允许同标签区域拆分/合并，"
+        f"双向覆盖率 >= {r['min_region_coverage']:.0%}"
+    )
+    if r["bbox_exempt_labels"]:
+        print(f"完全免除 bbox/漏检/误检惩罚的标签: {', '.join(r['bbox_exempt_labels'])}")
+    if r["label_only_labels"]:
+        print(f"只按同页标签配对、不检测 bbox 的标签: {', '.join(r['label_only_labels'])}")
+    if r["excluded_page_count"]:
+        print(f"公平比较: 两个模型统一排除 {r['excluded_page_count']} 个失败页面")
 
     print("\n【各任务概况】")
-    print(f"  {'job_id':<16}{'GT数':>8}{'匹配':>8}{'正确':>8}{'召回':>10}{'漏检':>8}{'多检':>8}")
+    print(f"  {'文档':<24}{'GT':>7}{'预测':>7}{'匹配':>7}{'标签正确':>10}{'端到端召回':>12}{'漏检':>7}{'误检':>7}")
     for row in r["job_rows"]:
         print(
-            f"  {row['job_id']:<16}{row['gt']:>8}{row['matched']:>8}{row['correct']:>8}"
-            f"{row['recall']:>9.1%}{row['missing']:>8}{row['extra']:>8}"
+            f"  {row['job_id'][:24]:<24}{row['gt']:>7}{row['predicted']:>7}{row['matched']:>7}"
+            f"{row['correct']:>10}{row['end_to_end_recall']:>11.1%}{row['missing']:>7}{row['extra']:>7}"
         )
 
     print("\n【各 label 指标】(以 ground_truth bbox 为基准)")
@@ -553,7 +903,7 @@ def print_report(r: Dict[str, Any]) -> None:
         precision = pred_cor / pre if pre else 0.0
         print(f"  {label:<20}{sup:>9}{cor:>9}{recall:>8.1%}{precision:>10.1%}{f1_score(precision, recall):>8.3f}")
 
-    print("\n【各标题层级 level 指标】")
+    print("\n【label + level 联合指标】(全部 block)")
     header = f"  {'level':<20}{'support':>9}{'correct':>9}{'recall':>9}{'precision':>11}{'f1':>8}"
     print(header)
     print("  " + "-" * (len(header) - 2))
@@ -581,14 +931,68 @@ def print_report(r: Dict[str, Any]) -> None:
         precision = pred_cor / pre if pre else 0.0
         print(f"  {level:<20}{sup:>9}{cor:>9}{recall:>8.1%}{precision:>10.1%}{f1_score(precision, recall):>8.3f}")
 
-    overall = r["total_correct"] / r["total_gt"] if r["total_gt"] else 0.0
+    total_pred = sum(r["predicted"].values())
+    detection_precision = r["total_matched"] / total_pred if total_pred else 0.0
+    detection_recall = r["total_matched"] / r["total_gt"] if r["total_gt"] else 0.0
+    classification_accuracy = (
+        r["total_strict_label_correct"] / r["total_matched"]
+        if r["total_matched"]
+        else 0.0
+    )
+    end_to_end_precision = r["total_pred_correct"] / total_pred if total_pred else 0.0
+    end_to_end_recall = r["total_correct"] / r["total_gt"] if r["total_gt"] else 0.0
     print("\n【整体】")
-    print(f"  ground_truth block 数 : {r['total_gt']}")
-    print(f"  bbox 可匹配 block 数  : {r['total_matched']}")
-    print(f"  label 正确 block 数   : {r['total_correct']}")
-    print(f"  整体 GT 召回准确率    : {overall:.2%}")
-    print(f"  ground_truth 有但 model_pre 无/覆盖不足: {r['missing']}")
-    print(f"  model_pre 多出的预测 block: {r['extra']}")
+    print(
+        f"  block 数: GT={r['total_gt']}, 预测={total_pred}, 几何匹配={r['total_matched']}, "
+        f"区域等价正确 GT/预测={r['total_correct']}/{r['total_pred_correct']}"
+    )
+    print(
+        "  检测       : "
+        f"Precision={detection_precision:.2%}, Recall={detection_recall:.2%}, "
+        f"F1={f1_score(detection_precision, detection_recall):.2%}"
+    )
+    print(f"  严格一对一匹配后的标签准确率: {classification_accuracy:.2%}")
+    print(
+        "  端到端     : "
+        f"Precision={end_to_end_precision:.2%}, Recall={end_to_end_recall:.2%}, "
+        f"F1={f1_score(end_to_end_precision, end_to_end_recall):.2%}"
+    )
+    print(f"  漏检={r['missing']}, 误检={r['extra']}")
+
+    if r.get("by_category"):
+        for category, category_result in r["by_category"].items():
+            print(f"\n【{category}：各 label】")
+            print(f"  {'label':<20}{'support':>9}{'recall':>10}{'precision':>11}{'f1':>9}")
+            labels = sorted(set(category_result["support"]) | set(category_result["predicted"]))
+            for label in labels:
+                support = category_result["support"][label]
+                predicted = category_result["predicted"][label]
+                gt_correct = category_result["correct"][label]
+                pred_correct = category_result["pred_correct"][label]
+                recall = gt_correct / support if support else 0.0
+                precision = pred_correct / predicted if predicted else 0.0
+                print(
+                    f"  {label:<20}{support:>9}{recall:>9.1%}"
+                    f"{precision:>10.1%}{f1_score(precision, recall):>9.3f}"
+                )
+
+            print(f"\n【{category}：paragraph_title 层级】")
+            print(f"  {'level':<20}{'support':>9}{'recall':>10}{'precision':>11}{'f1':>9}")
+            levels = sorted(
+                set(category_result["para_lvl_support"]) | set(category_result["para_lvl_predicted"]),
+                key=level_sort_key,
+            )
+            for level in levels:
+                support = category_result["para_lvl_support"][level]
+                predicted = category_result["para_lvl_predicted"][level]
+                gt_correct = category_result["para_lvl_correct"][level]
+                pred_correct = category_result["para_lvl_pred_correct"][level]
+                recall = gt_correct / support if support else 0.0
+                precision = pred_correct / predicted if predicted else 0.0
+                print(
+                    f"  {level:<20}{support:>9}{recall:>9.1%}"
+                    f"{precision:>10.1%}{f1_score(precision, recall):>9.3f}"
+                )
 
     if r["confusion"]:
         print("\n【主要错误  GT -> 预测 (Top 20)】")
@@ -601,7 +1005,7 @@ def print_report(r: Dict[str, Any]) -> None:
             print(f"  {gt_level:<10} -> {pred_level:<16} {count}")
 
     if r["skipped"]:
-        print("\n【跳过的任务】")
+        print("\n【数据对齐提示】")
         for job_id, reason in r["skipped"]:
             print(f"  {job_id}: {reason}")
 
@@ -643,31 +1047,105 @@ def result_to_jsonable(r: Dict[str, Any]) -> Dict[str, Any]:
             "precision": precision,
             "f1": f1_score(precision, recall),
         }
-    return {
+    total_predicted = sum(r["predicted"].values())
+    detection_precision = r["total_matched"] / total_predicted if total_predicted else 0.0
+    detection_recall = r["total_matched"] / r["total_gt"] if r["total_gt"] else 0.0
+    end_to_end_precision = r["total_pred_correct"] / total_predicted if total_predicted else 0.0
+    end_to_end_recall = r["total_correct"] / r["total_gt"] if r["total_gt"] else 0.0
+    jsonable = {
         "min_gt_coverage": r["min_gt_coverage"],
         "min_iou": r["min_iou"],
-        "overall_accuracy": r["total_correct"] / r["total_gt"] if r["total_gt"] else 0.0,
+        "min_region_coverage": r["min_region_coverage"],
+        "bbox_exempt_labels": list(r["bbox_exempt_labels"]),
+        "label_only_labels": list(r["label_only_labels"]),
+        "matching": {
+            "detection_method": "greedy_one_to_one_highest_iou",
+            "label_method": "same_label_content_or_bidirectional_region_coverage",
+            "min_iou": r["min_iou"],
+            "min_gt_coverage": r["min_gt_coverage"],
+            "min_region_coverage": r["min_region_coverage"],
+            "bbox_exempt_labels": list(r["bbox_exempt_labels"]),
+            "label_only_labels": list(r["label_only_labels"]),
+        },
+        "detection": {
+            "precision": detection_precision,
+            "recall": detection_recall,
+            "f1": f1_score(detection_precision, detection_recall),
+        },
+        "classification_accuracy_on_matched": (
+            r["total_strict_label_correct"] / r["total_matched"]
+            if r["total_matched"]
+            else 0.0
+        ),
+        "end_to_end": {
+            "precision": end_to_end_precision,
+            "recall": end_to_end_recall,
+            "f1": f1_score(end_to_end_precision, end_to_end_recall),
+        },
+        "overall_accuracy": end_to_end_recall,
         "total_gt": r["total_gt"],
+        "total_predicted": total_predicted,
         "total_matched": r["total_matched"],
         "total_correct": r["total_correct"],
+        "total_pred_correct": r["total_pred_correct"],
         "missing": r["missing"],
         "extra": r["extra"],
+        "excluded_page_count": r["excluded_page_count"],
         "per_label": per_label,
         "paragraph_title_by_level": paragraph_title_by_level,
         "job_rows": r["job_rows"],
         "skipped": r["skipped"],
     }
+    if r.get("by_category"):
+        jsonable["by_category"] = {
+            category: result_to_jsonable(category_result)
+            for category, category_result in r["by_category"].items()
+        }
+    return jsonable
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="按 bbox + label 评估 model_pre 相对 ground_truth 的准确率")
+    parser = argparse.ArgumentParser(description="按 IoU 几何匹配评估版面分析预测")
     parser.add_argument("--datasets", default=DEFAULT_DATASETS, help=f"datasets 目录 (默认: {DEFAULT_DATASETS})")
+    parser.add_argument(
+        "--prediction",
+        default="qwen3.6-27b",
+        help="datasets 下的预测目录名或绝对路径 (默认: qwen3.6-27b)",
+    )
     parser.add_argument("--first-annotations", help="一次标注目录，例如 backend/datasets/first_annotations")
     parser.add_argument("--second-annotations", help="二次标注目录，例如 backend/datasets/second_annotations；作为标准答案")
-    parser.add_argument("--min-gt-coverage", type=float, default=0.8, help="预测 bbox 至少覆盖 GT bbox 的比例")
-    parser.add_argument("--min-iou", type=float, default=0.0, help="可选 IoU 下限")
+    parser.add_argument(
+        "--min-gt-coverage",
+        type=float,
+        default=None,
+        help="可选附加条件：预测 bbox 至少覆盖 GT bbox 的比例；标准评估通常不设置",
+    )
+    parser.add_argument("--min-iou", type=float, default=0.5, help="IoU 下限 (默认: 0.5)")
+    parser.add_argument(
+        "--min-region-coverage",
+        type=float,
+        default=0.8,
+        help="拆分/合并区域的双向覆盖率下限 (默认: 0.8)",
+    )
+    parser.add_argument(
+        "--exclude-failed-pages-from",
+        action="append",
+        default=[],
+        metavar="PREDICTION_DIR",
+        help="读取该预测目录的失败页，并从所有模型的 GT/预测中统一排除；可重复指定",
+    )
     parser.add_argument("--json", metavar="PATH", help="可选: 将结果以 JSON 写入该文件")
     args = parser.parse_args()
+
+    failed_page_maps = []
+    for failed_root in args.exclude_failed_pages_from:
+        resolved_root = (
+            failed_root
+            if os.path.isabs(failed_root)
+            else os.path.join(args.datasets, failed_root)
+        )
+        failed_page_maps.append(discover_failed_pages(resolved_root))
+    excluded_pages = merge_failed_pages(*failed_page_maps)
 
     if args.first_annotations or args.second_annotations:
         if not args.first_annotations or not args.second_annotations:
@@ -677,9 +1155,18 @@ def main() -> None:
             args.first_annotations,
             min_gt_coverage=args.min_gt_coverage,
             min_iou=args.min_iou,
+            min_region_coverage=args.min_region_coverage,
+            excluded_pages=excluded_pages,
         )
     else:
-        result = evaluate(args.datasets, min_gt_coverage=args.min_gt_coverage, min_iou=args.min_iou)
+        result = evaluate(
+            args.datasets,
+            args.prediction,
+            min_gt_coverage=args.min_gt_coverage,
+            min_iou=args.min_iou,
+            min_region_coverage=args.min_region_coverage,
+            excluded_pages=excluded_pages,
+        )
     print_report(result)
     if args.json:
         with open(args.json, "w", encoding="utf-8") as f:

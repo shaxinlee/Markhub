@@ -615,6 +615,7 @@
           <select id="qwenImageProfileInput">
             <option value="qwen3_6" selected>Qwen3.6</option>
             <option value="qwen3_5">Qwen3.5</option>
+            <option value="qwen3">Qwen3-VL</option>
           </select>
         </div>
         <div class="field-grid">
@@ -762,7 +763,9 @@
         el("dpiInput").value = cfg.render_dpi || "180";
         el("pageInput").value = cfg.max_pages || "50";
         el("qwenPresetInput").value = cfg.qwen_preset || "default";
-        el("qwenImageProfileInput").value = cfg.qwen_image_profile === "qwen3_5" ? "qwen3_5" : "qwen3_6";
+        el("qwenImageProfileInput").value = ["qwen3_6", "qwen3_5", "qwen3"].includes(cfg.qwen_image_profile)
+          ? cfg.qwen_image_profile
+          : "qwen3_6";
         el("qwenWidthInput").value = cfg.qwen_width || "1536";
         el("qwenHeightInput").value = cfg.qwen_height || "2176";
         state.promptTemplates = payload.prompt_templates || [{ id: "default_template_1", name: "默认模板 1" }];
@@ -885,6 +888,8 @@
         el("qwenImageProfileInput").value = "qwen3_5";
       } else if (normalized.includes("qwen3.6") || normalized.includes("qwen3-6") || normalized.includes("qwen3_6")) {
         el("qwenImageProfileInput").value = "qwen3_6";
+      } else if (normalized.includes("qwen3")) {
+        el("qwenImageProfileInput").value = "qwen3";
       }
     }
 

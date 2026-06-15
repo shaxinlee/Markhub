@@ -13,11 +13,13 @@ from features.layout_analysis.service import (  # noqa: E402
     collect_done_blocks,
     job_block_from_annotation,
     build_training_lines,
+    qna_entry_from_page,
     normalize_annotation_block,
     normalize_export_block,
     normalize_heading_level,
     parse_model_json,
     repair_heading_level_continuity,
+    strip_think_prefix,
 )
 
 
@@ -95,6 +97,11 @@ def main() -> None:
     )
     trailing = '说明 {"source":"first"} 后面才是结果 {"source":"last_object","nested":{"keep":true}} 完成'
     assert_true(parse_model_json(trailing)["source"] == "last_object", "应回退抓取文本里最后一个完整 JSON 对象")
+    thinking_response = '<think>{"source":"thinking"}</think>\n{"source":"after_think"}'
+    assert_true(strip_think_prefix(thinking_response) == '{"source":"after_think"}', "应忽略 </think> 之前的模型思考内容")
+    assert_true(parse_model_json(thinking_response)["source"] == "after_think", "解析模型 JSON 时应忽略 </think> 之前的内容")
+    qna_entry = qna_entry_from_page(0, "model_pages/page_000_qwen.png", {"system": "s", "user": "u"}, thinking_response)
+    assert_true(qna_entry["assistant"] == '{"source":"after_think"}', "保存 Q&A assistant 时应忽略 </think> 之前的内容")
 
     doc_block = {"label": "doc_title", "level": "H1", "bbox": [0, 0, 10, 10]}
     caption_block = {"label": "caption", "level": "H2", "bbox": [0, 0, 10, 10]}
