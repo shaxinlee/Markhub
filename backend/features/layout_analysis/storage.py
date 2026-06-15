@@ -70,6 +70,7 @@ def public_llm_config(config: LLMConfig) -> Dict[str, str]:
         "model": config.model,
         "has_api_key": "true" if config.api_key else "false",
         "timeout": str(config.timeout),
+        "max_tokens": str(config.max_tokens),
     }
 
 
@@ -153,6 +154,7 @@ def persist_runtime_config(
         "LLM_BASE_URL": llm_config.base_url,
         "LLM_MODEL": llm_config.model,
         "LLM_TIMEOUT": str(llm_config.timeout),
+        "LLM_MAX_TOKENS": str(llm_config.max_tokens),
         "LAYOUT_RENDER_DPI": str(dpi),
         "LAYOUT_MAX_PAGES": str(max_pages),
         "QWEN_RESIZE_PRESET": resize_config.preset,

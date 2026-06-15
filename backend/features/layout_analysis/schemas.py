@@ -46,6 +46,7 @@ ENV_CONFIG_KEYS = [
     "LLM_API_KEY",
     "LLM_MODEL",
     "LLM_TIMEOUT",
+    "LLM_MAX_TOKENS",
     "LAYOUT_RENDER_DPI",
     "LAYOUT_MAX_PAGES",
     "LAYOUT_MAX_PDF_BYTES",
@@ -134,6 +135,7 @@ class LLMConfig:
     model: str
     api_key: str
     timeout: int
+    max_tokens: int = 8192
 
 
 @dataclass

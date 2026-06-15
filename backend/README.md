@@ -46,6 +46,7 @@ http://127.0.0.1:8787
 - `LLM_API_KEY`：页面模型配置的默认 API Key；若未设置会回退到 `OPENAI_API_KEY`
 - `LLM_MODEL`：页面模型配置的默认视觉大模型名称
 - `LLM_TIMEOUT`：单页模型调用超时秒数，默认 `180`
+- `LLM_MAX_TOKENS`：单页模型最大输出 Token 数，默认 `8192`
 - `LAYOUT_RENDER_DPI`：PDF 渲染 DPI，默认 `180`
 - `LAYOUT_MAX_PAGES`：单次最多分析页数，默认 `50`
 - `QWEN_RESIZE_PRESET`：页面检查图默认档位，`speed/default/high/custom`，默认 `default`

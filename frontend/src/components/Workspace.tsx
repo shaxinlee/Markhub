@@ -117,6 +117,7 @@ export default function Workspace({
   const [selectedModel, setSelectedModel] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [timeout, setTimeoutValue] = useState('180');
+  const [maxTokens, setMaxTokens] = useState('8192');
   const [renderDpi, setRenderDpi] = useState('180');
   const [maxPages, setMaxPages] = useState('50');
   const [qwenPreset, setQwenPreset] = useState('default');
@@ -297,6 +298,7 @@ export default function Workspace({
       setBaseUrl(cfg.base_url || '');
       setSelectedModel(cfg.model || '');
       setTimeoutValue(cfg.timeout || '180');
+      setMaxTokens(cfg.max_tokens || '8192');
       setRenderDpi(cfg.render_dpi || '180');
       setMaxPages(cfg.max_pages || '50');
       setQwenPreset(cfg.qwen_preset || 'default');
@@ -544,6 +546,7 @@ export default function Workspace({
     form.append('model', selectedModel.trim());
     form.append('api_key', apiKey.trim());
     form.append('timeout', timeout || '180');
+    form.append('max_tokens', maxTokens || '8192');
     form.append('qwen_preset', qwenPreset || 'default');
     form.append('qwen_image_profile', qwenImageProfile);
     form.append('qwen_width', qwenWidth || '1536');
@@ -748,7 +751,7 @@ export default function Workspace({
               <div className="flex flex-col gap-2">
                 <label className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">
                   <span>Model Endpoint</span>
-                  <Info className="h-3.5 w-3.5 cursor-help text-on-surface-variant hover:text-primary" title="These fields map directly to backend LLM_BASE_URL, LLM_MODEL, API key, and timeout." />
+                  <Info className="h-3.5 w-3.5 cursor-help text-on-surface-variant hover:text-primary" title="These fields map directly to backend LLM_BASE_URL, LLM_MODEL, API key, timeout, and maximum output tokens." />
                 </label>
                 <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="Base URL" className="w-full rounded-[0.75rem] border border-outline-variant/50 bg-surface-container px-3 py-2.5 text-xs font-medium text-on-surface outline-none focus:border-primary" />
                 <input value={selectedModel} onChange={(e) => handleModelNameChange(e.target.value)} placeholder="Model name" className="w-full rounded-[0.75rem] border border-outline-variant/50 bg-surface-container px-3 py-2.5 text-xs font-medium text-on-surface outline-none focus:border-primary" />
@@ -759,9 +762,16 @@ export default function Workspace({
                   <option value="qwen3_5">Qwen3.5 · 0-1000 坐标</option>
                   <option value="qwen3_6">Qwen3.6 · 0-1000 坐标</option>
                 </select>
+                <input value={apiKey} onChange={(e) => setApiKey(e.target.value)} type="password" placeholder="API Key optional" className="w-full rounded-[0.75rem] border border-outline-variant/50 bg-surface-container px-3 py-2.5 text-xs font-medium text-on-surface outline-none focus:border-primary" />
                 <div className="grid grid-cols-2 gap-2">
-                  <input value={apiKey} onChange={(e) => setApiKey(e.target.value)} type="password" placeholder="API Key optional" className="w-full rounded-[0.75rem] border border-outline-variant/50 bg-surface-container px-3 py-2.5 text-xs font-medium text-on-surface outline-none focus:border-primary" />
-                  <input value={timeout} onChange={(e) => setTimeoutValue(e.target.value)} type="number" min="10" max="900" placeholder="Timeout" className="w-full rounded-[0.75rem] border border-outline-variant/50 bg-surface-container px-3 py-2.5 text-xs font-medium text-on-surface outline-none focus:border-primary" />
+                  <label className="flex flex-col gap-1 text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">
+                    超时秒数
+                    <input aria-label="超时秒数" value={timeout} onChange={(e) => setTimeoutValue(e.target.value)} type="number" min="10" max="900" placeholder="180" className="w-full rounded-[0.75rem] border border-outline-variant/50 bg-surface-container px-3 py-2.5 text-xs font-medium text-on-surface outline-none focus:border-primary" />
+                  </label>
+                  <label className="flex flex-col gap-1 text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">
+                    最大输出 Token
+                    <input aria-label="最大输出 Token" value={maxTokens} onChange={(e) => setMaxTokens(e.target.value)} type="number" min="256" max="65536" step="256" placeholder="8192" className="w-full rounded-[0.75rem] border border-outline-variant/50 bg-surface-container px-3 py-2.5 text-xs font-medium text-on-surface outline-none focus:border-primary" />
+                  </label>
                 </div>
               </div>
 

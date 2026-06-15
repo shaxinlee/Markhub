@@ -483,6 +483,7 @@ def test_prompt(prompt_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
                 model=model_name,
                 api_key=clean_text(body.get("api_key"), os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY") or ""),
                 timeout=clamp_int(body.get("timeout"), default=int(os.getenv("LLM_TIMEOUT", "180")), minimum=10, maximum=900),
+                max_tokens=clamp_int(body.get("max_tokens"), default=int(os.getenv("LLM_MAX_TOKENS", "8192")), minimum=256, maximum=65536),
             )
             if not llm_config.model:
                 raise ValueError("missing model name")
@@ -492,6 +493,7 @@ def test_prompt(prompt_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
                 messages=[{"role": "user", "content": rendered}],
                 temperature=0,
                 timeout=llm_config.timeout,
+                max_tokens=llm_config.max_tokens,
             )
             output = completion.choices[0].message.content if completion.choices else ""
             usage = getattr(completion, "usage", None)
@@ -552,6 +554,7 @@ def env_config() -> Dict[str, str]:
         "render_dpi": os.getenv("LAYOUT_RENDER_DPI", "180"),
         "max_pages": os.getenv("LAYOUT_MAX_PAGES", "50"),
         "max_pdf_bytes": str(max_pdf_bytes()),
+        "max_tokens": os.getenv("LLM_MAX_TOKENS", "8192"),
         "qwen_preset": os.getenv("QWEN_RESIZE_PRESET", "default"),
         "qwen_image_profile": os.getenv("QWEN_IMAGE_PROFILE", "qwen3_6"),
         "qwen_width": os.getenv("QWEN_RESIZED_WIDTH", "1536"),

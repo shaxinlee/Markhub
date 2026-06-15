@@ -628,6 +628,10 @@
             <label for="timeoutInput">超时秒数</label>
             <input id="timeoutInput" type="number" min="10" max="900" value="180" />
           </div>
+          <div class="field">
+            <label for="maxTokensInput">最大输出 Token</label>
+            <input id="maxTokensInput" type="number" min="256" max="65536" step="256" value="8192" />
+          </div>
         </div>
         <div class="field" style="margin-top: 10px;">
           <label for="qwenPresetInput">Qwen 检查图尺寸</label>
@@ -760,6 +764,8 @@
         const cfg = payload.config || {};
         el("baseUrlInput").value = cfg.base_url || "";
         el("modelInput").value = cfg.model || "";
+        el("timeoutInput").value = cfg.timeout || "180";
+        el("maxTokensInput").value = cfg.max_tokens || "8192";
         el("apiKeyInput").placeholder = cfg.has_api_key === "true" ? "已从环境变量读取，可覆盖" : "本地服务可留空";
         el("dpiInput").value = cfg.render_dpi || "180";
         el("pageInput").value = cfg.max_pages || "50";
@@ -827,6 +833,7 @@
         form.append("model", el("modelInput").value.trim());
         form.append("api_key", el("apiKeyInput").value.trim());
         form.append("timeout", el("timeoutInput").value || "180");
+        form.append("max_tokens", el("maxTokensInput").value || "8192");
         form.append("qwen_preset", el("qwenPresetInput").value || "default");
         form.append("qwen_image_profile", el("qwenImageProfileInput").value || "qwen3_6");
         form.append("qwen_width", el("qwenWidthInput").value || "1536");

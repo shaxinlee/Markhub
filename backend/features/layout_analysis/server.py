@@ -483,11 +483,13 @@ class LayoutAnalyzerHandler(BaseHTTPRequestHandler):
             dpi = clamp_int(fields.get("dpi"), default=int(env_config()["render_dpi"]), minimum=72, maximum=300)
             max_pages = clamp_int(fields.get("max_pages"), default=int(env_config()["max_pages"]), minimum=1, maximum=200)
             timeout = clamp_int(fields.get("timeout"), default=int(os.getenv("LLM_TIMEOUT", "180")), minimum=10, maximum=900)
+            max_tokens = clamp_int(fields.get("max_tokens"), default=int(os.getenv("LLM_MAX_TOKENS", "8192")), minimum=256, maximum=65536)
             llm_config = LLMConfig(
                 base_url=clean_text(fields.get("base_url"), env_config()["base_url"]),
                 model=clean_text(fields.get("model"), env_config()["model"]),
                 api_key=clean_text(fields.get("api_key"), os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY") or ""),
                 timeout=timeout,
+                max_tokens=max_tokens,
             )
             resize_config = parse_resize_config(fields)
             if not llm_config.base_url:

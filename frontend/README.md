@@ -23,7 +23,7 @@ The frontend server runs on `http://localhost:3000` and proxies `/api/*` and `/j
 ## Backend-aligned Features
 
 - PDF upload through backend `POST /api/analyze` multipart form data.
-- Model endpoint, API key, timeout, render DPI, max pages, Qwen resize, and prompt template controls.
+- Model endpoint, API key, timeout, maximum output tokens, render DPI, max pages, Qwen resize, and prompt template controls.
 - Backend job polling through `GET /api/jobs/{job_id}/result`.
 - History loading and deletion through `GET /api/jobs` and `DELETE /api/jobs/{job_id}`.
 - Real backend block types: `doc_title`, `paragraph_title`, `text`, `table_of_contents`, `table`, `formula`, `chart`, `image`, `caption`, `vision_footnote`, `header`, `footer`, `handwriting`, and `seal`.

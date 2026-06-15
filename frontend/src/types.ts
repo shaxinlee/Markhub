@@ -179,7 +179,7 @@ export interface BackendJob {
   result?: { blocks?: BackendBlock[]; [key: string]: unknown };
   warnings?: string[];
   errors?: string[];
-  config?: { model?: string; base_url?: string; timeout?: string; model_dir?: string };
+  config?: { model?: string; base_url?: string; timeout?: string; max_tokens?: string; model_dir?: string };
   resize?: { preset?: string; image_profile?: string; width?: number; height?: number };
   prompt_template?: { id?: string; name?: string };
 }
@@ -197,6 +197,7 @@ export interface BackendConfig {
   qwen_height?: string;
   prompt_template_id?: string;
   timeout?: string;
+  max_tokens?: string;
 }
 
 export interface AnnotationSegment {

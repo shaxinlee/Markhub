@@ -342,6 +342,7 @@ def call_layout_llm(model_page: ModelPageImage, original_page: PageImage, config
             },
         ],
         timeout=config.timeout,
+        max_tokens=config.max_tokens,
         extra_body={"enable_thinking": False},
     )
     content = completion.choices[0].message.content if completion.choices else ""
