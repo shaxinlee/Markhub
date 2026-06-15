@@ -157,7 +157,7 @@ def resize_page_for_model(page: PageImage, job_dir: Path, config: VisionResizeCo
     with Image.open(page.image_path) as image:
         image = image.convert("RGB")
         resampling = getattr(Image, "Resampling", Image).LANCZOS
-        if config.image_profile in {"qwen3", "qwen3_5"}:
+        if config.image_profile in {"qwen2_5", "qwen3", "qwen3_5"}:
             target_w, target_h = smart_resize_dimensions(
                 page.width,
                 page.height,
@@ -270,7 +270,32 @@ def build_heading_context(prior_blocks: List[Dict[str, Any]], recent_limit: int 
     return "\n".join(lines)
 
 
-def build_page_user_text(model_page: ModelPageImage, heading_context: str = "") -> str:
+def coordinate_instruction(model_page: ModelPageImage, image_profile: str) -> str:
+    if image_profile == "qwen2_5":
+        return (
+            f"请输出当前 {model_page.width}x{model_page.height} 模型图像上的绝对像素 bbox，"
+            f"x 坐标范围为 0-{model_page.width}，y 坐标范围为 0-{model_page.height}，不要输出 0-1000 相对坐标。"
+        )
+    return "请严格输出 0-1000 相对坐标 bbox，不要输出像素坐标。"
+
+
+def prompt_for_image_profile(prompt: str, model_page: ModelPageImage, image_profile: str) -> str:
+    if image_profile != "qwen2_5":
+        return prompt
+    adapted = prompt.replace(
+        "bbox 必须使用 Qwen3-VL grounding 的 0–1000 相对坐标系，不要输出原始像素坐标。",
+        "bbox 必须使用当前模型图像的绝对像素坐标，不要输出 0-1000 相对坐标。",
+    ).replace(
+        "bbox 格式为 [左上角x, 左上角y, 右下角x, 右下角y]，每个值都必须在 0 到 1000 之间。",
+        (
+            "bbox 格式为 [左上角x, 左上角y, 右下角x, 右下角y]，"
+            f"x 必须在 0 到 {model_page.width} 之间，y 必须在 0 到 {model_page.height} 之间。"
+        ),
+    )
+    return adapted + "\n\nQwen2.5-VL 坐标要求（覆盖前文）：\n- " + coordinate_instruction(model_page, image_profile)
+
+
+def build_page_user_text(model_page: ModelPageImage, heading_context: str = "", image_profile: str = "qwen3_6") -> str:
     """Assemble the per-page user prompt actually sent to the model. The heading
     context varies page to page, so each page's prompt differs slightly."""
     user_text = prompt_fragment("page_user_text").format(
@@ -278,17 +303,23 @@ def build_page_user_text(model_page: ModelPageImage, heading_context: str = "") 
         width=model_page.width,
         height=model_page.height,
     )
+    if image_profile == "qwen2_5":
+        user_text = (
+            f"当前页面 page_id={model_page.page_id}。你看到的模型图像尺寸为 "
+            f"{model_page.width}x{model_page.height} 像素。{coordinate_instruction(model_page, image_profile)}"
+        )
     if heading_context:
         user_text += "\n\n" + heading_context
     return user_text
 
 
-def call_layout_llm(model_page: ModelPageImage, original_page: PageImage, config: LLMConfig, prompt_template: PromptTemplate, heading_context: str = "") -> Tuple[Dict[str, Any], Dict[str, str], str]:
+def call_layout_llm(model_page: ModelPageImage, original_page: PageImage, config: LLMConfig, prompt_template: PromptTemplate, heading_context: str = "", image_profile: str = "qwen3_6") -> Tuple[Dict[str, Any], Dict[str, str], str]:
     """Run one page through the model. Returns the parsed payload plus the exact
     prompt fed to the model (``{"system", "user"}``) so it can be persisted as a
     fine-tuning input alongside the result."""
     client = OpenAI(api_key=config.api_key or "EMPTY", base_url=config.base_url)
-    user_text = build_page_user_text(model_page, heading_context)
+    system_prompt = prompt_for_image_profile(prompt_template.prompt, model_page, image_profile)
+    user_text = build_page_user_text(model_page, heading_context, image_profile)
     image_item = {
         "type": "image_url",
         "image_url": {"url": image_to_data_url(model_page.image_path)},
@@ -301,7 +332,7 @@ def call_layout_llm(model_page: ModelPageImage, original_page: PageImage, config
         model=config.model,
         temperature=0,
         messages=[
-            {"role": "system", "content": prompt_template.prompt},
+            {"role": "system", "content": system_prompt},
             {
                 "role": "user",
                 "content": [
@@ -314,7 +345,7 @@ def call_layout_llm(model_page: ModelPageImage, original_page: PageImage, config
         extra_body={"enable_thinking": False},
     )
     content = completion.choices[0].message.content if completion.choices else ""
-    model_input = {"system": prompt_template.prompt, "user": user_text}
+    model_input = {"system": system_prompt, "user": user_text}
     cleaned_content = strip_think_prefix(content or "")
     return parse_model_json(cleaned_content), model_input, cleaned_content
 
@@ -443,6 +474,7 @@ def normalize_blocks(
     model_page: ModelPageImage,
     original_page: PageImage,
     prior_blocks: Optional[List[Dict[str, Any]]] = None,
+    image_profile: str = "qwen3_6",
 ) -> Tuple[List[Dict[str, Any]], List[str]]:
     raw_blocks = payload.get("blocks", [])
     warnings: List[str] = []
@@ -460,11 +492,16 @@ def normalize_blocks(
             warnings.append(f"page {original_page.page_id} block {raw_index}: 非法 block_type={block_type!r}，已跳过")
             continue
 
-        bbox_1000 = normalize_qwen_bbox(raw.get("bbox") if raw.get("bbox") is not None else raw.get("bbox_2d"))
-        if bbox_1000 is None:
+        raw_bbox = raw.get("bbox") if raw.get("bbox") is not None else raw.get("bbox_2d")
+        if image_profile == "qwen2_5":
+            model_bbox = normalize_bbox(raw_bbox, model_page.width, model_page.height)
+            bbox_1000 = model_pixels_to_qwen_bbox(model_bbox, model_page) if model_bbox else None
+        else:
+            bbox_1000 = normalize_qwen_bbox(raw_bbox)
+            model_bbox = qwen_bbox_to_model_pixels(bbox_1000, model_page) if bbox_1000 else None
+        if bbox_1000 is None or model_bbox is None:
             warnings.append(f"page {original_page.page_id} block {raw_index}: bbox 无效，已跳过")
             continue
-        model_bbox = qwen_bbox_to_model_pixels(bbox_1000, model_page)
         bbox = scale_bbox(model_bbox, model_page, original_page)
 
         text = "" if raw.get("text") is None else str(raw.get("text"))
@@ -618,6 +655,16 @@ def qwen_bbox_to_model_pixels(bbox_1000: List[int], model_page: ModelPageImage) 
     ) or [0, 0, model_page.width, model_page.height]
 
 
+def model_pixels_to_qwen_bbox(model_bbox: List[int], model_page: ModelPageImage) -> List[int]:
+    x1, y1, x2, y2 = model_bbox
+    return [
+        max(0, min(1000, int(round(x1 / max(model_page.width, 1) * 1000)))),
+        max(0, min(1000, int(round(y1 / max(model_page.height, 1) * 1000)))),
+        max(0, min(1000, int(round(x2 / max(model_page.width, 1) * 1000)))),
+        max(0, min(1000, int(round(y2 / max(model_page.height, 1) * 1000)))),
+    ]
+
+
 def normalize_bbox(value: Any, width: int, height: int) -> Optional[List[int]]:
     if not isinstance(value, (list, tuple)) or len(value) != 4:
         return None
@@ -751,8 +798,21 @@ def process_job_pages(
         try:
             job_dir = find_job_dir(job_id)
             model_page = resize_page_for_model(page, job_dir=job_dir, config=resize_config)
-            payload, model_input, model_response = call_layout_llm(model_page, original_page=page, config=llm_config, prompt_template=prompt_template, heading_context=heading_context)
-            blocks, block_warnings = normalize_blocks(payload, model_page=model_page, original_page=page, prior_blocks=prior_blocks)
+            payload, model_input, model_response = call_layout_llm(
+                model_page,
+                original_page=page,
+                config=llm_config,
+                prompt_template=prompt_template,
+                heading_context=heading_context,
+                image_profile=resize_config.image_profile,
+            )
+            blocks, block_warnings = normalize_blocks(
+                payload,
+                model_page=model_page,
+                original_page=page,
+                prior_blocks=prior_blocks,
+                image_profile=resize_config.image_profile,
+            )
             layout_page = layout_page_from_analysis(page, model_page, blocks, job_dir)
             upsert_jsonl_record(
                 qa_jsonl_path(job_id),

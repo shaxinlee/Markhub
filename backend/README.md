@@ -49,7 +49,7 @@ http://127.0.0.1:8787
 - `LAYOUT_RENDER_DPI`：PDF 渲染 DPI，默认 `180`
 - `LAYOUT_MAX_PAGES`：单次最多分析页数，默认 `50`
 - `QWEN_RESIZE_PRESET`：页面检查图默认档位，`speed/default/high/custom`，默认 `default`
-- `QWEN_IMAGE_PROFILE`：模型图像规格，`qwen3_6` 保持固定画布，`qwen3_5` 和 `qwen3` 使用 Qwen3-VL 等比动态分辨率
+- `QWEN_IMAGE_PROFILE`：模型图像规格；`qwen2_5` 使用 28 倍数动态分辨率和像素坐标，`qwen3`、`qwen3_5` 使用 32 倍数动态分辨率和 `0-1000` 坐标，`qwen3_6` 保持固定画布和 `0-1000` 坐标
 - `QWEN_RESIZED_WIDTH`：自定义检查图宽度，默认 `1536`
 - `QWEN_RESIZED_HEIGHT`：自定义检查图高度，默认 `2176`
 
@@ -72,7 +72,7 @@ Qwen 图像缩放设置也在页面左侧：
 
 后端会将 PDF 页面等比缩放后居中放入标准白底检查图，不拉伸页面比例。调用 Qwen3-VL 时会在 image 同级设置 `resized_width`、`resized_height`、`min_pixels` 和 `max_pixels`，且 `min_pixels = max_pixels = width × height`。模型提示词要求 bbox 输出 `0-1000` 相对坐标；后端先映射到标准检查图，再扣除白边并映射回 PDF 预览页面的原始像素坐标。
 
-Qwen3-VL 原生使用 `0-1000` 归一化 bbox；Qwen2.5-VL 原生输出缩放后图像的绝对像素坐标。选择 `qwen3` 时会使用无白边、32 倍数的动态分辨率，并按 `0-1000` 坐标映射。
+Qwen3-VL 原生使用 `0-1000` 归一化 bbox；Qwen2.5-VL 原生输出缩放后图像的绝对像素坐标。页面中的模型版本选择会同时控制图像预处理、提示词坐标要求和结果解析。无论模型原始输出是哪种坐标，保存结果时都会生成统一的 `bbox_1000` 供导出与训练使用。
 
 提示词模板也在页面左侧选择。当前内置模板名为 `默认模板 1`，内容为原有版面分析提示词；每次分析结果会记录本次使用的模板名称。
 

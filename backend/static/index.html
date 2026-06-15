@@ -611,11 +611,12 @@
           <input id="modelInput" type="text" placeholder="/data/sdnu/Qwen2.5-VL-72B-Instruct-AWQ" autocomplete="off" />
         </div>
         <div class="field" style="margin-bottom: 10px;">
-          <label for="qwenImageProfileInput">Qwen 模型版本</label>
+          <label for="qwenImageProfileInput">Qwen 模型版本与坐标</label>
           <select id="qwenImageProfileInput">
-            <option value="qwen3_6" selected>Qwen3.6</option>
-            <option value="qwen3_5">Qwen3.5</option>
-            <option value="qwen3">Qwen3-VL</option>
+            <option value="qwen2_5">Qwen2.5-VL · 像素坐标</option>
+            <option value="qwen3">Qwen3-VL · 0-1000 坐标</option>
+            <option value="qwen3_5">Qwen3.5 · 0-1000 坐标</option>
+            <option value="qwen3_6" selected>Qwen3.6 · 0-1000 坐标</option>
           </select>
         </div>
         <div class="field-grid">
@@ -763,7 +764,7 @@
         el("dpiInput").value = cfg.render_dpi || "180";
         el("pageInput").value = cfg.max_pages || "50";
         el("qwenPresetInput").value = cfg.qwen_preset || "default";
-        el("qwenImageProfileInput").value = ["qwen3_6", "qwen3_5", "qwen3"].includes(cfg.qwen_image_profile)
+        el("qwenImageProfileInput").value = ["qwen2_5", "qwen3", "qwen3_5", "qwen3_6"].includes(cfg.qwen_image_profile)
           ? cfg.qwen_image_profile
           : "qwen3_6";
         el("qwenWidthInput").value = cfg.qwen_width || "1536";
@@ -884,7 +885,9 @@
 
     function syncQwenImageProfileFromModelName() {
       const normalized = el("modelInput").value.toLowerCase();
-      if (normalized.includes("qwen3.5") || normalized.includes("qwen3-5") || normalized.includes("qwen3_5")) {
+      if (normalized.includes("qwen2.5") || normalized.includes("qwen2-5") || normalized.includes("qwen2_5")) {
+        el("qwenImageProfileInput").value = "qwen2_5";
+      } else if (normalized.includes("qwen3.5") || normalized.includes("qwen3-5") || normalized.includes("qwen3_5")) {
         el("qwenImageProfileInput").value = "qwen3_5";
       } else if (normalized.includes("qwen3.6") || normalized.includes("qwen3-6") || normalized.includes("qwen3_6")) {
         el("qwenImageProfileInput").value = "qwen3_6";

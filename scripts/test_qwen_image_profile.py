@@ -16,7 +16,7 @@ sys.path.insert(0, str(BACKEND))
 from features.layout_analysis.paths import JOBS_DIR  # noqa: E402
 from features.layout_analysis.schemas import PageImage, VisionResizeConfig  # noqa: E402
 from features.layout_analysis.server import parse_resize_config  # noqa: E402
-from features.layout_analysis.service import qwen_bbox_to_model_pixels, resize_page_for_model, scale_bbox  # noqa: E402
+from features.layout_analysis.service import normalize_blocks, prompt_for_image_profile, qwen_bbox_to_model_pixels, resize_page_for_model, scale_bbox  # noqa: E402
 
 
 def assert_equal(actual, expected, message: str) -> None:
@@ -52,6 +52,36 @@ def main() -> int:
 
         parsed = parse_resize_config({"qwen_preset": "default", "qwen_image_profile": "qwen3"})
         assert_equal(parsed.image_profile, "qwen3", "后端应保留 qwen3 图像规格")
+
+        qwen25_config = parse_resize_config({"qwen_preset": "default", "qwen_image_profile": "qwen2_5"})
+        assert_equal(qwen25_config.image_profile, "qwen2_5", "后端应保留 qwen2.5 图像规格")
+        assert_equal(qwen25_config.factor, 28, "qwen2.5 动态分辨率应使用 28 倍数")
+        qwen25 = resize_page_for_model(page, root / "qwen25", qwen25_config)
+        assert_equal((qwen25.width % 28, qwen25.height % 28), (0, 0), "qwen2.5 输出尺寸应是 28 的倍数")
+        assert_equal((qwen25.content_x, qwen25.content_y), (0, 0), "qwen2.5 应等比缩放而不加白边")
+        qwen25_pixel_bbox = [
+            round(qwen25.width * 0.1),
+            round(qwen25.height * 0.1),
+            round(qwen25.width * 0.5),
+            round(qwen25.height * 0.5),
+        ]
+        blocks, warnings = normalize_blocks(
+            {"blocks": [{"block_type": "text", "text": "像素坐标", "bbox": qwen25_pixel_bbox}]},
+            model_page=qwen25,
+            original_page=page,
+            image_profile="qwen2_5",
+        )
+        assert_equal(warnings, [], "qwen2.5 像素 bbox 不应产生警告")
+        assert_equal(blocks[0]["bbox"], [100, 200, 500, 1000], "qwen2.5 像素 bbox 应映射回原页面")
+        assert_equal(blocks[0]["bbox_1000"], [100, 100, 500, 500], "qwen2.5 像素 bbox 应统一保存为 0-1000")
+        qwen25_prompt = prompt_for_image_profile(
+            "bbox 必须使用 Qwen3-VL grounding 的 0–1000 相对坐标系，不要输出原始像素坐标。\n"
+            "bbox 格式为 [左上角x, 左上角y, 右下角x, 右下角y]，每个值都必须在 0 到 1000 之间。",
+            qwen25,
+            "qwen2_5",
+        )
+        assert "绝对像素坐标" in qwen25_prompt, "qwen2.5 提示词应要求绝对像素坐标"
+        assert "必须使用 Qwen3-VL grounding" not in qwen25_prompt, "qwen2.5 提示词不应残留 Qwen3 坐标要求"
 
     print("ok")
     return 0
