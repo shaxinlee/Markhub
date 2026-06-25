@@ -60,10 +60,16 @@ RESIZE_PRESETS = {
     "speed": (1216, 1728),
     "default": (1536, 2176),
     "high": (2048, 2912),
+    "qwen3_speed": (1024, 1024),
+    "qwen3_default": (1344, 1792),
+    "qwen3_high": (1536, 2048),
+    "qwen3_6_speed": (1216, 1728),
+    "qwen3_6_default": (1536, 2176),
+    "qwen3_6_high": (2048, 2912),
 }
 
 DEFAULT_PROMPT_TEMPLATE_ID = "default_template_1"
-BUILTIN_LAYOUT_PROMPT_REVISION = "layout_prompt_v20260611_description"
+BUILTIN_LAYOUT_PROMPT_REVISION = "layout_prompt_v20260622_schema_rollback"
 PROMPT_TEMPLATE_CATEGORIES = {"bounding_box", "polygon", "layout", "keypoints", "text_transcription"}
 PROMPT_TYPES = {
     "data_annotation",

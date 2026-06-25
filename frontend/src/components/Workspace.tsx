@@ -39,6 +39,39 @@ interface WorkspaceProps {
   onIncreaseAnnotationsCount: (increment: number) => void;
 }
 
+type QwenImageProfile = 'qwen2_5' | 'qwen3' | 'qwen3_5' | 'qwen3_6';
+
+const QWEN_RESOLUTION_OPTIONS: Record<QwenImageProfile, { value: string; label: string; width: string; height: string }[]> = {
+  qwen2_5: [
+    { value: 'speed', label: 'Speed · 1216 × 1728', width: '1216', height: '1728' },
+    { value: 'default', label: 'Default · 1536 × 2176', width: '1536', height: '2176' },
+    { value: 'high', label: 'High · 2048 × 2912', width: '2048', height: '2912' },
+  ],
+  qwen3: [
+    { value: 'qwen3_speed', label: 'Recommended · 1024 × 1024', width: '1024', height: '1024' },
+    { value: 'qwen3_default', label: 'Recommended · 1344 × 1792', width: '1344', height: '1792' },
+    { value: 'qwen3_high', label: 'Recommended · 1536 × 2048', width: '1536', height: '2048' },
+  ],
+  qwen3_5: [
+    { value: 'speed', label: 'Speed · 1216 × 1728', width: '1216', height: '1728' },
+    { value: 'default', label: 'Default · 1536 × 2176', width: '1536', height: '2176' },
+    { value: 'high', label: 'High · 2048 × 2912', width: '2048', height: '2912' },
+  ],
+  qwen3_6: [
+    { value: 'qwen3_6_speed', label: 'Speed · 1216 × 1728', width: '1216', height: '1728' },
+    { value: 'qwen3_6_default', label: 'Default · 1536 × 2176', width: '1536', height: '2176' },
+    { value: 'qwen3_6_high', label: 'High · 2048 × 2912', width: '2048', height: '2912' },
+  ],
+};
+
+function coerceQwenPreset(profile: QwenImageProfile, preset?: string) {
+  if (preset === 'custom') return 'custom';
+  if (profile === 'qwen3' && ['speed', 'default', 'high'].includes(preset || '')) return `qwen3_${preset}`;
+  if (profile === 'qwen3_6' && ['speed', 'default', 'high'].includes(preset || '')) return `qwen3_6_${preset}`;
+  const options = QWEN_RESOLUTION_OPTIONS[profile];
+  return options.some((option) => option.value === preset) ? preset || options[0].value : options[1]?.value || options[0].value;
+}
+
 const BLOCK_TYPES: BackendBlockType[] = [
   'doc_title',
   'paragraph_title',
@@ -120,8 +153,8 @@ export default function Workspace({
   const [maxTokens, setMaxTokens] = useState('8192');
   const [renderDpi, setRenderDpi] = useState('180');
   const [maxPages, setMaxPages] = useState('50');
-  const [qwenPreset, setQwenPreset] = useState('default');
-  const [qwenImageProfile, setQwenImageProfile] = useState<'qwen2_5' | 'qwen3' | 'qwen3_5' | 'qwen3_6'>('qwen3_6');
+  const [qwenPreset, setQwenPreset] = useState('qwen3_6_default');
+  const [qwenImageProfile, setQwenImageProfile] = useState<QwenImageProfile>('qwen3_6');
   const [qwenWidth, setQwenWidth] = useState('1536');
   const [qwenHeight, setQwenHeight] = useState('2176');
   const [promptTemplateId, setPromptTemplateId] = useState('default_template_1');
@@ -167,6 +200,7 @@ export default function Workspace({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const currentPage = analysisJob?.pages?.[currentPageIndex] || null;
+  const qwenResolutionOptions = QWEN_RESOLUTION_OPTIONS[qwenImageProfile];
   const displayedPageCount = analysisJob?.page_count || 0;
   const availablePageCount = analysisJob?.pages?.length || 0;
   const completedPages = analysisJob?.completed_pages || 0;
@@ -301,14 +335,16 @@ export default function Workspace({
       setMaxTokens(cfg.max_tokens || '8192');
       setRenderDpi(cfg.render_dpi || '180');
       setMaxPages(cfg.max_pages || '50');
-      setQwenPreset(cfg.qwen_preset || 'default');
-      setQwenImageProfile(
+      const configProfile: QwenImageProfile =
         cfg.qwen_image_profile === 'qwen2_5' || cfg.qwen_image_profile === 'qwen3' || cfg.qwen_image_profile === 'qwen3_5'
           ? cfg.qwen_image_profile
-          : 'qwen3_6'
-      );
-      setQwenWidth(cfg.qwen_width || '1536');
-      setQwenHeight(cfg.qwen_height || '2176');
+          : 'qwen3_6';
+      const configPreset = coerceQwenPreset(configProfile, cfg.qwen_preset || 'default');
+      const configResolution = QWEN_RESOLUTION_OPTIONS[configProfile].find((option) => option.value === configPreset);
+      setQwenImageProfile(configProfile);
+      setQwenPreset(configPreset);
+      setQwenWidth(configPreset === 'custom' ? cfg.qwen_width || '1536' : configResolution?.width || cfg.qwen_width || '1536');
+      setQwenHeight(configPreset === 'custom' ? cfg.qwen_height || '2176' : configResolution?.height || cfg.qwen_height || '2176');
       setPromptTemplateId(cfg.prompt_template_id || 'default_template_1');
       if (payload.prompt_templates?.length) setPromptTemplates(payload.prompt_templates);
     } catch (error) {
@@ -473,17 +509,37 @@ export default function Workspace({
     e.target.value = '';
   };
 
+  const applyQwenImageProfile = (profile: QwenImageProfile, preset = qwenPreset) => {
+    const nextPreset = coerceQwenPreset(profile, preset);
+    const resolution = QWEN_RESOLUTION_OPTIONS[profile].find((option) => option.value === nextPreset);
+    setQwenImageProfile(profile);
+    setQwenPreset(nextPreset);
+    if (resolution) {
+      setQwenWidth(resolution.width);
+      setQwenHeight(resolution.height);
+    }
+  };
+
+  const handleQwenPresetChange = (value: string) => {
+    setQwenPreset(value);
+    const resolution = qwenResolutionOptions.find((option) => option.value === value);
+    if (resolution) {
+      setQwenWidth(resolution.width);
+      setQwenHeight(resolution.height);
+    }
+  };
+
   const handleModelNameChange = (value: string) => {
     setSelectedModel(value);
     const normalized = value.toLowerCase();
     if (normalized.includes('qwen2.5') || normalized.includes('qwen2-5') || normalized.includes('qwen2_5')) {
-      setQwenImageProfile('qwen2_5');
+      applyQwenImageProfile('qwen2_5');
     } else if (normalized.includes('qwen3.5') || normalized.includes('qwen3-5') || normalized.includes('qwen3_5')) {
-      setQwenImageProfile('qwen3_5');
+      applyQwenImageProfile('qwen3_5');
     } else if (normalized.includes('qwen3.6') || normalized.includes('qwen3-6') || normalized.includes('qwen3_6')) {
-      setQwenImageProfile('qwen3_6');
+      applyQwenImageProfile('qwen3_6');
     } else if (normalized.includes('qwen3')) {
-      setQwenImageProfile('qwen3');
+      applyQwenImageProfile('qwen3');
     }
   };
 
@@ -756,7 +812,7 @@ export default function Workspace({
                 <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="Base URL" className="w-full rounded-[0.75rem] border border-outline-variant/50 bg-surface-container px-3 py-2.5 text-xs font-medium text-on-surface outline-none focus:border-primary" />
                 <input value={selectedModel} onChange={(e) => handleModelNameChange(e.target.value)} placeholder="Model name" className="w-full rounded-[0.75rem] border border-outline-variant/50 bg-surface-container px-3 py-2.5 text-xs font-medium text-on-surface outline-none focus:border-primary" />
                 <label htmlFor="qwenModelProfile" className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">模型版本与坐标</label>
-                <select id="qwenModelProfile" value={qwenImageProfile} onChange={(e) => setQwenImageProfile(e.target.value as 'qwen2_5' | 'qwen3' | 'qwen3_5' | 'qwen3_6')} className="w-full rounded-[0.75rem] border border-outline-variant/50 bg-surface-container px-3 py-2.5 text-xs font-medium text-on-surface outline-none focus:border-primary">
+                <select id="qwenModelProfile" value={qwenImageProfile} onChange={(e) => applyQwenImageProfile(e.target.value as QwenImageProfile)} className="w-full rounded-[0.75rem] border border-outline-variant/50 bg-surface-container px-3 py-2.5 text-xs font-medium text-on-surface outline-none focus:border-primary">
                   <option value="qwen2_5">Qwen2.5-VL · 像素坐标</option>
                   <option value="qwen3">Qwen3-VL · 0-1000 坐标</option>
                   <option value="qwen3_5">Qwen3.5 · 0-1000 坐标</option>
@@ -783,10 +839,10 @@ export default function Workspace({
                   <input value={renderDpi} onChange={(e) => setRenderDpi(e.target.value)} type="number" min="72" max="300" placeholder="Render DPI" className="w-full bg-surface-container-lowest border border-outline-variant/40 rounded-[0.75rem] px-3 py-2.5 text-xs text-primary focus:outline-none focus:border-outline-variant/70 font-medium" />
                   <input value={maxPages} onChange={(e) => setMaxPages(e.target.value)} type="number" min="1" max="200" placeholder="Max pages" className="w-full bg-surface-container-lowest border border-outline-variant/40 rounded-[0.75rem] px-3 py-2.5 text-xs text-primary focus:outline-none focus:border-outline-variant/70 font-medium" />
                 </div>
-                <select value={qwenPreset} onChange={(e) => setQwenPreset(e.target.value)} className="w-full bg-surface-container-lowest border border-outline-variant/40 rounded-[0.75rem] px-3 py-2.5 text-xs text-primary focus:outline-none focus:border-outline-variant/70 font-medium">
-                  <option value="speed">Speed · 1216 × 1728</option>
-                  <option value="default">Default · 1536 × 2176</option>
-                  <option value="high">High · 2048 × 2912</option>
+                <select value={qwenPreset} onChange={(e) => handleQwenPresetChange(e.target.value)} className="w-full bg-surface-container-lowest border border-outline-variant/40 rounded-[0.75rem] px-3 py-2.5 text-xs text-primary focus:outline-none focus:border-outline-variant/70 font-medium">
+                  {qwenResolutionOptions.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
                   <option value="custom">Custom</option>
                 </select>
                 {qwenPreset === 'custom' && (

@@ -70,9 +70,16 @@ async function startServer() {
     console.log('Production static asset streaming configured.');
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`Frontend running on: http://localhost:${PORT}`);
     console.log(`Proxying /api and /jobs to: ${BACKEND_URL}`);
+  });
+  server.on('error', (error: NodeJS.ErrnoException) => {
+    if (error.code === 'EADDRINUSE') {
+      console.error(`Frontend port ${PORT} is already in use. Stop the existing process or set PORT to another value.`);
+      process.exit(1);
+    }
+    throw error;
   });
 }
 

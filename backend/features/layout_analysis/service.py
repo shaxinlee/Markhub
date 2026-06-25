@@ -149,45 +149,26 @@ def smart_resize_dimensions(width: int, height: int, max_pixels: int, factor: in
 
 
 def resize_page_for_model(page: PageImage, job_dir: Path, config: VisionResizeConfig) -> ModelPageImage:
-    target_w, target_h = dimensions_for_page(page, config)
     model_dir = job_dir / "model_pages"
     model_dir.mkdir(parents=True, exist_ok=True)
     out_path = model_dir / f"page_{page.page_id:03d}_qwen.png"
 
-    with Image.open(page.image_path) as image:
-        image = image.convert("RGB")
-        resampling = getattr(Image, "Resampling", Image).LANCZOS
-        if config.image_profile in {"qwen2_5", "qwen3", "qwen3_5"}:
-            target_w, target_h = smart_resize_dimensions(
-                page.width,
-                page.height,
-                max_pixels=config.width * config.height,
-                factor=config.factor,
-            )
-            content_w, content_h = target_w, target_h
-            content_x, content_y = 0, 0
-            image.resize((content_w, content_h), resampling).save(out_path, format="PNG")
-        else:
-            scale = min(target_w / page.width, target_h / page.height)
-            content_w = max(1, int(round(page.width * scale)))
-            content_h = max(1, int(round(page.height * scale)))
-            content_x = (target_w - content_w) // 2
-            content_y = (target_h - content_h) // 2
-            resized = image.resize((content_w, content_h), resampling)
-            canvas = Image.new("RGB", (target_w, target_h), "white")
-            canvas.paste(resized, (content_x, content_y))
-            canvas.save(out_path, format="PNG")
+    # Keep the image seen by the model identical to the image shown in the UI.
+    # This makes Qwen's 0-1000 grounding map directly onto the displayed page
+    # pixels and avoids a second resize/padding coordinate transform.
+    if page.image_path != out_path:
+        shutil.copy2(page.image_path, out_path)
 
     return ModelPageImage(
         page_id=page.page_id,
-        width=target_w,
-        height=target_h,
+        width=page.width,
+        height=page.height,
         image_path=out_path,
         image_url=relative_job_url(out_path),
-        content_x=content_x,
-        content_y=content_y,
-        content_width=content_w,
-        content_height=content_h,
+        content_x=0,
+        content_y=0,
+        content_width=page.width,
+        content_height=page.height,
         original_width=page.width,
         original_height=page.height,
     )
@@ -340,8 +321,8 @@ def call_layout_llm(model_page: ModelPageImage, original_page: PageImage, config
             {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": user_text},
                     image_item,
+                    {"type": "text", "text": user_text},
                 ],
             },
         ],

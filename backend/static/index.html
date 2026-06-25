@@ -636,9 +636,6 @@
         <div class="field" style="margin-top: 10px;">
           <label for="qwenPresetInput">Qwen 检查图尺寸</label>
           <select id="qwenPresetInput">
-            <option value="speed">速度优先 · 1216 × 1728</option>
-            <option value="default" selected>推荐默认 · 1536 × 2176</option>
-            <option value="high">高精度 · 2048 × 2912</option>
             <option value="custom">自定义</option>
           </select>
         </div>
@@ -755,7 +752,61 @@
       promptTemplates: []
     };
 
+    const QWEN_RESOLUTION_OPTIONS = {
+      qwen2_5: [
+        { value: "speed", label: "速度优先 · 1216 × 1728", width: "1216", height: "1728" },
+        { value: "default", label: "推荐默认 · 1536 × 2176", width: "1536", height: "2176" },
+        { value: "high", label: "高精度 · 2048 × 2912", width: "2048", height: "2912" }
+      ],
+      qwen3: [
+        { value: "qwen3_speed", label: "推荐分辨率 · 1024 × 1024", width: "1024", height: "1024" },
+        { value: "qwen3_default", label: "推荐分辨率 · 1344 × 1792", width: "1344", height: "1792" },
+        { value: "qwen3_high", label: "推荐分辨率 · 1536 × 2048", width: "1536", height: "2048" }
+      ],
+      qwen3_5: [
+        { value: "speed", label: "速度优先 · 1216 × 1728", width: "1216", height: "1728" },
+        { value: "default", label: "推荐默认 · 1536 × 2176", width: "1536", height: "2176" },
+        { value: "high", label: "高精度 · 2048 × 2912", width: "2048", height: "2912" }
+      ],
+      qwen3_6: [
+        { value: "qwen3_6_speed", label: "速度优先 · 1216 × 1728", width: "1216", height: "1728" },
+        { value: "qwen3_6_default", label: "推荐默认 · 1536 × 2176", width: "1536", height: "2176" },
+        { value: "qwen3_6_high", label: "高精度 · 2048 × 2912", width: "2048", height: "2912" }
+      ]
+    };
+
     const el = (id) => document.getElementById(id);
+
+    function coerceQwenPreset(profile, preset) {
+      if (preset === "custom") return "custom";
+      if (profile === "qwen3" && ["speed", "default", "high"].includes(preset || "")) return `qwen3_${preset}`;
+      if (profile === "qwen3_6" && ["speed", "default", "high"].includes(preset || "")) return `qwen3_6_${preset}`;
+      const options = QWEN_RESOLUTION_OPTIONS[profile] || QWEN_RESOLUTION_OPTIONS.qwen3_6;
+      return options.some((option) => option.value === preset) ? preset : options[1].value;
+    }
+
+    function renderQwenPresetOptions(selectedPreset) {
+      const profile = el("qwenImageProfileInput").value || "qwen3_6";
+      const options = QWEN_RESOLUTION_OPTIONS[profile] || QWEN_RESOLUTION_OPTIONS.qwen3_6;
+      const nextPreset = coerceQwenPreset(profile, selectedPreset || el("qwenPresetInput").value || "default");
+      el("qwenPresetInput").innerHTML = [
+        ...options.map((option) => `<option value="${option.value}">${option.label}</option>`),
+        `<option value="custom">自定义</option>`
+      ].join("");
+      el("qwenPresetInput").value = nextPreset;
+      syncQwenPresetSize();
+    }
+
+    function syncQwenPresetSize() {
+      const profile = el("qwenImageProfileInput").value || "qwen3_6";
+      const preset = el("qwenPresetInput").value;
+      const option = (QWEN_RESOLUTION_OPTIONS[profile] || []).find((item) => item.value === preset);
+      if (option) {
+        el("qwenWidthInput").value = option.width;
+        el("qwenHeightInput").value = option.height;
+      }
+      updateCustomSizeVisibility();
+    }
 
     async function loadConfig() {
       try {
@@ -769,15 +820,14 @@
         el("apiKeyInput").placeholder = cfg.has_api_key === "true" ? "已从环境变量读取，可覆盖" : "本地服务可留空";
         el("dpiInput").value = cfg.render_dpi || "180";
         el("pageInput").value = cfg.max_pages || "50";
-        el("qwenPresetInput").value = cfg.qwen_preset || "default";
         el("qwenImageProfileInput").value = ["qwen2_5", "qwen3", "qwen3_5", "qwen3_6"].includes(cfg.qwen_image_profile)
           ? cfg.qwen_image_profile
           : "qwen3_6";
         el("qwenWidthInput").value = cfg.qwen_width || "1536";
         el("qwenHeightInput").value = cfg.qwen_height || "2176";
+        renderQwenPresetOptions(cfg.qwen_preset || "default");
         state.promptTemplates = payload.prompt_templates || [{ id: "default_template_1", name: "默认模板 1" }];
         renderPromptTemplates(cfg.prompt_template_id || "default_template_1");
-        updateCustomSizeVisibility();
         el("modelState").textContent = cfg.has_api_key === "true" ? "已配置" : "本地模式";
       } catch (err) {
         el("modelState").textContent = "配置读取失败";
@@ -901,6 +951,7 @@
       } else if (normalized.includes("qwen3")) {
         el("qwenImageProfileInput").value = "qwen3";
       }
+      renderQwenPresetOptions();
     }
 
     function renderAll() {
@@ -1184,7 +1235,8 @@
     el("analyzeBtn").addEventListener("click", analyze);
     el("jsonBtn").addEventListener("click", () => el("jsonPanel").classList.toggle("open"));
     el("fitBtn").addEventListener("click", () => window.scrollTo({ top: 0, behavior: "smooth" }));
-    el("qwenPresetInput").addEventListener("change", updateCustomSizeVisibility);
+    el("qwenImageProfileInput").addEventListener("change", () => renderQwenPresetOptions());
+    el("qwenPresetInput").addEventListener("change", syncQwenPresetSize);
     el("modelInput").addEventListener("input", syncQwenImageProfileFromModelName);
 
     const dropzone = el("dropzone");

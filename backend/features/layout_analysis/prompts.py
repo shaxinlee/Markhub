@@ -31,6 +31,7 @@ PROMPT_DEFAULTS: Dict[str, Any] = _load_defaults()
 
 # The built-in layout-analysis system prompt, assembled from its line array.
 LAYOUT_PROMPT = "\n".join(PROMPT_DEFAULTS["layout_analysis_system"])
+COMPACT_LAYOUT_PROMPT = "\n".join(PROMPT_DEFAULTS["compact_layout_analysis_system"])
 
 
 def prompt_fragment(*path: str, default: str = "") -> str:
@@ -53,5 +54,11 @@ PROMPT_TEMPLATES = {
         "name": "默认模板 1",
         "category": "layout",
         "prompt": LAYOUT_PROMPT,
-    }
+    },
+    "compact_layout_prompt": {
+        "id": "compact_layout_prompt",
+        "name": "精简提示词",
+        "category": "layout",
+        "prompt": COMPACT_LAYOUT_PROMPT,
+    },
 }
