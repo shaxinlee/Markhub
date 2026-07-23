@@ -494,6 +494,10 @@ def test_prompt(prompt_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
                 temperature=0,
                 timeout=llm_config.timeout,
                 max_tokens=llm_config.max_tokens,
+                extra_body={
+                    "enable_thinking": False,
+                    "chat_template_kwargs": {"enable_thinking": False},
+                },
             )
             output = completion.choices[0].message.content if completion.choices else ""
             usage = getattr(completion, "usage", None)
@@ -554,6 +558,8 @@ def env_config() -> Dict[str, str]:
         "render_dpi": os.getenv("LAYOUT_RENDER_DPI", "180"),
         "max_pages": os.getenv("LAYOUT_MAX_PAGES", "50"),
         "max_pdf_bytes": str(max_pdf_bytes()),
+        "page_concurrency": os.getenv("LAYOUT_PAGE_CONCURRENCY", "1"),
+        "page_schedule": os.getenv("LAYOUT_PAGE_SCHEDULE", "contiguous"),
         "max_tokens": os.getenv("LLM_MAX_TOKENS", "8192"),
         "qwen_preset": os.getenv("QWEN_RESIZE_PRESET", "default"),
         "qwen_image_profile": os.getenv("QWEN_IMAGE_PROFILE", "qwen3_6"),

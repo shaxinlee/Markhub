@@ -81,6 +81,7 @@ const BLOCK_TYPES: BackendBlockType[] = [
   'formula',
   'chart',
   'flowchart',
+  'diagram',
   'image',
   'vision_footnote',
   'header',
@@ -99,6 +100,7 @@ const BLOCK_TYPE_LABELS: Record<BackendBlockType, string> = {
   formula: 'Formula',
   chart: 'Chart',
   flowchart: 'Flowchart',
+  diagram: 'Diagram',
   image: 'Image',
   vision_footnote: 'Footnote',
   header: 'Header',
@@ -117,6 +119,7 @@ const DEFAULT_VISIBLE_TYPES: Record<BackendBlockType, boolean> = {
   formula: true,
   chart: true,
   flowchart: true,
+  diagram: true,
   image: true,
   vision_footnote: true,
   header: true,
@@ -949,7 +952,7 @@ export default function Workspace({
               </button>
               <select value={currentPageIndex} onChange={(e) => goToPage(Number(e.target.value))} className="min-w-0 flex-1 bg-transparent text-primary focus:outline-none">
                 {analysisJob.pages.map((page, idx) => (
-                  <option key={page.page_id} value={idx}>Page {page.page_id + 1} · {page.status || 'pending'}</option>
+                  <option key={page.page_id} value={idx}>Page {page.page_id + 1} · {page.status || 'pending'}{page.elapsed_time != null ? ` · ${page.elapsed_time.toFixed(1)}s` : ''}</option>
                 ))}
               </select>
               <button onClick={goToNextPage} disabled={currentPageIndex >= availablePageCount - 1} className="flex h-6 w-6 shrink-0 items-center justify-center text-on-surface-variant hover:text-primary disabled:cursor-not-allowed disabled:text-on-surface-variant/40" title="下一页">

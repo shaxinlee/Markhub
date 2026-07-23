@@ -9,8 +9,11 @@ backwards compatibility with existing handler dispatch.
 from __future__ import annotations
 
 import base64
+from concurrent.futures import Future, ThreadPoolExecutor
+from io import BytesIO
 import json
 import math
+import os
 import re
 import shutil
 import threading
@@ -145,6 +148,12 @@ def smart_resize_dimensions(width: int, height: int, max_pixels: int, factor: in
         beta = math.sqrt(min_pixels / max(width * height, 1))
         resized_w = _ceil_by_factor(width * beta, factor)
         resized_h = _ceil_by_factor(height * beta, factor)
+    # Factor alignment can push the ceil-based minimum resize just above the
+    # configured maximum. The maximum is a hard memory/latency budget.
+    if resized_w * resized_h > max_pixels:
+        beta = math.sqrt((resized_w * resized_h) / max_pixels)
+        resized_w = _floor_by_factor(resized_w / beta, factor)
+        resized_h = _floor_by_factor(resized_h / beta, factor)
     return resized_w, resized_h
 
 
@@ -251,6 +260,73 @@ def build_heading_context(prior_blocks: List[Dict[str, Any]], recent_limit: int 
     return "\n".join(lines)
 
 
+def build_page_heading_context(
+    available_blocks: List[Dict[str, Any]],
+    page_id: int,
+    include_following: bool = False,
+    following_limit: int = 12,
+    text_limit: int = 40,
+) -> str:
+    """Build page-specific heading context without leaking future headings into
+    the active path.
+
+    Staggered scheduling infers odd-numbered pages before the even-numbered
+    pages between them.  For a later even-page request, headings from both
+    sides are available.  Previous headings define the active hierarchy path;
+    following headings are appended as a separately labelled reference only.
+    """
+    previous_blocks = [
+        block
+        for block in available_blocks
+        if isinstance(block, dict) and int(block.get("page_id", -1)) < page_id
+    ]
+    context = build_heading_context(previous_blocks)
+    if not include_following:
+        return context
+
+    following = [
+        block
+        for block in available_blocks
+        if isinstance(block, dict)
+        and int(block.get("page_id", -1)) > page_id
+        and block.get("block_type") == "paragraph_title"
+        and block.get("level") in LEVELS
+    ]
+    following.sort(
+        key=lambda block: (
+            int(block.get("page_id", 0)),
+            int((block.get("bbox") or [0, 0])[1]),
+            int((block.get("bbox") or [0, 0])[0]),
+        )
+    )
+    following = following[:following_limit]
+
+    def clip(text: Any) -> str:
+        compact = re.sub(r"\s+", " ", str(text or "")).strip()
+        return compact[:text_limit] + ("…" if len(compact) > text_limit else "")
+
+    empty_value = prompt_fragment("heading_context", "empty_value", default="无")
+    lines = [
+        context,
+        "",
+        prompt_fragment(
+            "heading_context",
+            "following_header",
+            default="【后续页面已识别的 paragraph_title 层级（仅供相对层级参考，请勿当作当前页内容输出）】",
+        ),
+        prompt_fragment("heading_context", "following_label", default="后续页面标题序列："),
+    ]
+    if following:
+        for block in following:
+            lines.append(
+                f"  page {int(block.get('page_id', 0)) + 1}: "
+                f"{block['level']} {clip(block.get('text'))}"
+            )
+    else:
+        lines.append("  " + empty_value)
+    return "\n".join(lines)
+
+
 def coordinate_instruction(model_page: ModelPageImage, image_profile: str) -> str:
     if image_profile == "qwen2_5":
         return (
@@ -328,7 +404,14 @@ def call_layout_llm(model_page: ModelPageImage, original_page: PageImage, config
         ],
         timeout=config.timeout,
         max_tokens=config.max_tokens,
-        extra_body={"enable_thinking": False},
+        extra_body={
+            # Qwen3/Qwen3.5 style no-thinking.  Some OpenAI-compatible
+            # servers accept the short flag, while vLLM applies it through
+            # chat_template_kwargs.  Keep both so layout inference always
+            # starts directly with the JSON answer instead of reasoning text.
+            "enable_thinking": False,
+            "chat_template_kwargs": {"enable_thinking": False},
+        },
     )
     content = completion.choices[0].message.content if completion.choices else ""
     model_input = {"system": system_prompt, "user": user_text}
@@ -563,9 +646,45 @@ def normalize_blocks(
         )
 
     blocks.sort(key=lambda b: (b["page_id"], b["bbox"][1], b["bbox"][0]))
+    blocks = suppress_duplicate_seal_text(blocks)
     blocks, level_warnings = repair_heading_level_continuity(blocks, prior_blocks=prior_blocks)
     warnings.extend(f"page {original_page.page_id}: {warning}" for warning in level_warnings)
     return blocks, warnings
+
+
+SEAL_INTERNAL_TEXT_PATTERN = re.compile(r"^(?:(?:合同|财务|发票|业务|行政|公司)?专用章|公章)$")
+
+
+def suppress_duplicate_seal_text(blocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    seals = [block for block in blocks if block.get("block_type") == "seal"]
+    if not seals:
+        return blocks
+
+    filtered: List[Dict[str, Any]] = []
+    for block in blocks:
+        compact_text = re.sub(r"\s+", "", str(block.get("text") or ""))
+        if block.get("block_type") != "text" or not SEAL_INTERNAL_TEXT_PATTERN.fullmatch(compact_text):
+            filtered.append(block)
+            continue
+        bbox = block.get("bbox_1000")
+        if not any(bbox_coverage(bbox, seal.get("bbox_1000")) >= 0.5 for seal in seals):
+            filtered.append(block)
+    return filtered
+
+
+def bbox_coverage(bbox: Any, covering_bbox: Any) -> float:
+    if not isinstance(bbox, list) or not isinstance(covering_bbox, list) or len(bbox) != 4 or len(covering_bbox) != 4:
+        return 0.0
+    x1, y1, x2, y2 = bbox
+    cover_x1, cover_y1, cover_x2, cover_y2 = covering_bbox
+    area = max(0, x2 - x1) * max(0, y2 - y1)
+    if not area:
+        return 0.0
+    intersection = (
+        max(0, min(x2, cover_x2) - max(x1, cover_x1))
+        * max(0, min(y2, cover_y2) - max(y1, cover_y1))
+    )
+    return intersection / area
 
 
 def repair_heading_level_continuity(
@@ -807,6 +926,8 @@ def start_analysis_job(
         },
     }
     result["config"]["model_dir"] = model_dir_name(llm_config.model)
+    result["config"]["page_concurrency"] = layout_page_concurrency(len(pages))
+    result["config"]["page_schedule"] = layout_page_schedule()
     write_job_result(job_id, result)
 
     worker = threading.Thread(
@@ -825,85 +946,1149 @@ def process_job_pages(
     resize_config: VisionResizeConfig,
     prompt_template: PromptTemplate,
 ) -> None:
-    for page in pages:
-        state = read_job_result(job_id)
-        state["pages"][page.page_id]["status"] = "processing"
-        write_job_result(job_id, state)
+    page_concurrency = layout_page_concurrency(len(pages))
+    page_schedule = layout_page_schedule()
 
-        prior_blocks = state["result"].get("blocks", [])
-        heading_context = build_heading_context(prior_blocks)
-
-        model_page: Optional[ModelPageImage] = None
-        try:
-            job_dir = find_job_dir(job_id)
-            model_page = resize_page_for_model(page, job_dir=job_dir, config=resize_config)
-            payload, model_input, model_response = call_layout_llm(
-                model_page,
-                original_page=page,
-                config=llm_config,
-                prompt_template=prompt_template,
-                heading_context=heading_context,
-                image_profile=resize_config.image_profile,
-            )
-            blocks, block_warnings = normalize_blocks(
-                payload,
-                model_page=model_page,
-                original_page=page,
-                prior_blocks=prior_blocks,
-                image_profile=resize_config.image_profile,
-            )
-            layout_page = layout_page_from_analysis(page, model_page, blocks, job_dir)
-            upsert_jsonl_record(
-                qa_jsonl_path(job_id),
-                qna_entry_from_page(page.page_id, layout_page["model_image_path"], model_input, model_response),
-            )
-            upsert_jsonl_record(layout_jsonl_path(job_id), layout_page)
-
-            state = read_job_result(job_id)
-            state["pages"][page.page_id].update(
-                {
-                    "status": "done",
-                    "blocks": layout_page["blocks"],
-                    "raw": payload,
-                    "model_input": model_input,
-                    "model_image_url": layout_page["model_image_url"],
-                    "model_width": layout_page["model_width"],
-                    "model_height": layout_page["model_height"],
-                    "model_content_bbox": layout_page["model_content_bbox"],
-                }
-            )
-            state["result"]["blocks"] = collect_done_blocks(state["pages"])
-            state["warnings"].extend(block_warnings)
-            state["completed_pages"] = count_finished_pages(state["pages"])
-            write_job_result(job_id, state)
-        except Exception as exc:
-            err = f"第 {page.page_id + 1} 页分析失败: {type(exc).__name__}: {exc}"
-            state = read_job_result(job_id)
-            page_update = {"status": "error", "blocks": [], "raw": None, "error": err}
-            if model_page is not None:
-                page_update.update(
-                    {
-                        "model_image_url": model_page.image_url,
-                        "model_width": model_page.width,
-                        "model_height": model_page.height,
-                        "model_content_bbox": [
-                            model_page.content_x,
-                            model_page.content_y,
-                            model_page.content_x + model_page.content_width,
-                            model_page.content_y + model_page.content_height,
-                        ],
-                    }
+    with ThreadPoolExecutor(max_workers=page_concurrency, thread_name_prefix=f"layout-{job_id}") as executor:
+        if page_schedule == "staggered":
+            window_size = page_concurrency * 2
+            for window_start in range(0, len(pages), window_size):
+                window = pages[window_start : window_start + window_size]
+                leading_pages = window[0::2]
+                trailing_pages = window[1::2]
+                run_page_inference_group(
+                    executor,
+                    job_id,
+                    leading_pages,
+                    llm_config,
+                    resize_config,
+                    prompt_template,
+                    include_following=False,
                 )
-            state["pages"][page.page_id].update(page_update)
-            state["errors"].append(err)
-            state["completed_pages"] = count_finished_pages(state["pages"])
-            write_job_result(job_id, state)
+                run_page_inference_group(
+                    executor,
+                    job_id,
+                    trailing_pages,
+                    llm_config,
+                    resize_config,
+                    prompt_template,
+                    include_following=True,
+                )
+        else:
+            for batch_start in range(0, len(pages), page_concurrency):
+                run_page_inference_group(
+                    executor,
+                    job_id,
+                    pages[batch_start : batch_start + page_concurrency],
+                    llm_config,
+                    resize_config,
+                    prompt_template,
+                    include_following=False,
+                    anchor_first_page=page_schedule == "contiguous_anchor",
+                    cascade_first_page=page_schedule == "contiguous_cascade",
+                )
 
     state = read_job_result(job_id)
+    if layout_document_heading_reconciliation_enabled():
+        state = reconcile_document_heading_levels(state, job_id)
+    if layout_heading_schema_reconciliation_enabled():
+        state = reconcile_heading_schema_levels(state, job_id)
+    if layout_deep_heading_review_enabled():
+        state = review_deep_heading_candidates(state, job_id, llm_config)
     state["status"] = "complete"
     state["completed_pages"] = count_finished_pages(state["pages"])
     state["result"]["blocks"] = collect_done_blocks(state["pages"])
     write_job_result(job_id, state)
+
+
+def run_page_inference_group(
+    executor: ThreadPoolExecutor,
+    job_id: str,
+    pages: List[PageImage],
+    llm_config: LLMConfig,
+    resize_config: VisionResizeConfig,
+    prompt_template: PromptTemplate,
+    include_following: bool,
+    anchor_first_page: bool = False,
+    cascade_first_page: bool = False,
+) -> None:
+    if not pages:
+        return
+    if cascade_first_page and len(pages) > 1:
+        # Resolve the first page of a four-page batch before dispatching the
+        # remaining three.  This costs one short extra wave, but makes the new
+        # batch root visible to every trailing model request instead of only
+        # to post-processing.  It is deliberately a separate schedule from
+        # contiguous_anchor so speed-sensitive deployments keep their current
+        # behavior.
+        state = read_job_result(job_id)
+        first_page = pages[0]
+        state["pages"][first_page.page_id]["status"] = "processing"
+        heading_context = build_page_heading_context(state["result"].get("blocks", []), first_page.page_id)
+        started_at = time.time()
+        future = executor.submit(
+            infer_page,
+            job_id,
+            first_page,
+            llm_config,
+            resize_config,
+            prompt_template,
+            heading_context,
+        )
+        write_job_result(job_id, state)
+        commit_page_inference(job_id, first_page, future, started_at, resize_config)
+        run_page_inference_group(
+            executor,
+            job_id,
+            pages[1:],
+            llm_config,
+            resize_config,
+            prompt_template,
+            include_following=include_following,
+        )
+        return
+    state = read_job_result(job_id)
+    available_blocks = state["result"].get("blocks", [])
+    futures: List[
+        Tuple[
+            PageImage,
+            float,
+            Future[Tuple[ModelPageImage, Dict[str, Any], Dict[str, str], str]],
+        ]
+    ] = []
+    for page in pages:
+        state["pages"][page.page_id]["status"] = "processing"
+        heading_context = build_page_heading_context(
+            available_blocks,
+            page.page_id,
+            include_following=include_following,
+        )
+        started_at = time.time()
+        future = executor.submit(
+            infer_page,
+            job_id,
+            page,
+            llm_config,
+            resize_config,
+            prompt_template,
+            heading_context,
+        )
+        futures.append((page, started_at, future))
+    write_job_result(job_id, state)
+
+    # The group can finish out of order, but normalization and persistence are
+    # deterministic. In staggered mode, future pages already present in state
+    # are filtered out again by commit_page_inference.
+    if anchor_first_page:
+        # All requests still run concurrently.  Normalize the first page using
+        # the hierarchy inherited from earlier batches, then use that page as
+        # the sole new hierarchy anchor for every remaining page in the batch.
+        # This prevents a mistaken level on page 2 from cascading into pages 3
+        # and 4, while adding no model request.
+        anchor_page, anchor_started_at, anchor_future = futures[0]
+        commit_page_inference(job_id, anchor_page, anchor_future, anchor_started_at, resize_config)
+        anchor_state = read_job_result(job_id)
+        anchor_prior_blocks = [
+            block
+            for block in anchor_state["result"].get("blocks", [])
+            if isinstance(block, dict) and int(block.get("page_id", -1)) <= anchor_page.page_id
+        ]
+        for page, started_at, future in futures[1:]:
+            commit_page_inference(
+                job_id,
+                page,
+                future,
+                started_at,
+                resize_config,
+                prior_blocks_override=anchor_prior_blocks,
+            )
+    else:
+        for page, started_at, future in futures:
+            commit_page_inference(job_id, page, future, started_at, resize_config)
+
+
+def layout_page_concurrency(page_count: int) -> int:
+    try:
+        configured = int(os.getenv("LAYOUT_PAGE_CONCURRENCY", "1"))
+    except ValueError:
+        configured = 1
+    return min(max(configured, 1), 16, max(page_count, 1))
+
+
+def layout_page_schedule() -> str:
+    configured = str(os.getenv("LAYOUT_PAGE_SCHEDULE", "contiguous")).strip().lower()
+    if configured in {"staggered", "odd_even", "odd-even"}:
+        return "staggered"
+    if configured in {"contiguous_anchor", "contiguous-anchor", "batch_anchor", "batch-anchor"}:
+        return "contiguous_anchor"
+    if configured in {"contiguous_cascade", "contiguous-cascade", "batch_cascade", "batch-cascade"}:
+        return "contiguous_cascade"
+    return "contiguous"
+
+
+def layout_document_heading_reconciliation_enabled() -> bool:
+    value = str(os.getenv("LAYOUT_DOCUMENT_HEADING_RECONCILIATION", "false")).strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
+def layout_heading_schema_reconciliation_enabled() -> bool:
+    """Enable conservative local numbering-family title reconciliation."""
+    value = str(os.getenv("LAYOUT_HEADING_SCHEMA_RECONCILIATION", "false")).strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
+def layout_deep_heading_review_enabled() -> bool:
+    value = str(os.getenv("LAYOUT_DEEP_HEADING_REVIEW", "false")).strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
+def layout_deep_heading_review_limit() -> int:
+    try:
+        return min(max(int(os.getenv("LAYOUT_DEEP_HEADING_REVIEW_LIMIT", "32")), 1), 96)
+    except ValueError:
+        return 32
+
+
+HEADING_RECONCILIATION_WEIGHTS = {
+    "model_match": 4,
+    "model_change": -3,
+    "chapter_root": 8,
+    "decimal_relative_depth": 5,
+    "direct_parent_match": 9,
+    "direct_parent_conflict": -8,
+    "sibling_match": 7,
+    "sibling_conflict": -7,
+    "legal_same_level": 2,
+    "legal_descend": 3,
+    "legal_ascend": 1,
+    "skip_one_level": -10,
+    "skip_two_levels": -16,
+    "missing_parent_deep_level": -8,
+    "cross_page_parent": 8,
+    "cross_page_sibling": 7,
+    "same_level_indent": 2,
+    "deeper_indent": 2,
+    "indent_conflict": -2,
+}
+
+
+def heading_level_rank(level: Any) -> int:
+    return {"H1": 1, "H2": 2, "H3": 3, "H4": 4}.get(str(level), 0)
+
+
+def heading_rank_level(rank: int) -> str:
+    return {1: "H1", 2: "H2", 3: "H3", 4: "H4"}[rank]
+
+
+def heading_decimal_number(text: Any) -> Optional[Tuple[int, ...]]:
+    compact = re.sub(r"\s+", "", str(text or ""))
+    match = re.match(r"^(\d+(?:[.．]\d+)+)(?=$|[^\d])", compact)
+    if not match:
+        return None
+    try:
+        return tuple(int(part) for part in re.split(r"[.．]", match.group(1)))
+    except ValueError:
+        return None
+
+
+def heading_is_chapter_root(text: Any) -> bool:
+    compact = re.sub(r"\s+", "", str(text or ""))
+    return bool(
+        re.match(r"^第[一二三四五六七八九十百\d]+[章节]", compact)
+        or re.match(r"^[一二三四五六七八九十]+[、.．]", compact)
+    )
+
+
+def heading_bbox_left(block: Dict[str, Any]) -> Optional[float]:
+    bbox = block.get("bbox")
+    if not isinstance(bbox, list) or len(bbox) != 4:
+        return None
+    try:
+        return float(bbox[0])
+    except (TypeError, ValueError):
+        return None
+
+
+CHINESE_HEADING_DIGITS = {
+    "零": 0, "一": 1, "二": 2, "三": 3, "四": 4, "五": 5,
+    "六": 6, "七": 7, "八": 8, "九": 9, "十": 10,
+}
+
+
+def heading_chinese_ordinal(value: str) -> Optional[int]:
+    """Parse the small Chinese ordinals normally used by section headings."""
+    compact = str(value or "").strip()
+    if compact in CHINESE_HEADING_DIGITS:
+        return CHINESE_HEADING_DIGITS[compact]
+    match = re.fullmatch(r"十([一二三四五六七八九])", compact)
+    if match:
+        return 10 + CHINESE_HEADING_DIGITS[match.group(1)]
+    match = re.fullmatch(r"([二三四五六七八九])十([一二三四五六七八九])?", compact)
+    if match:
+        return CHINESE_HEADING_DIGITS[match.group(1)] * 10 + CHINESE_HEADING_DIGITS.get(match.group(2), 0)
+    return None
+
+
+def heading_number_schema(text: Any) -> Optional[Dict[str, Any]]:
+    """Return a normalized leading-number family for locally grouped headings.
+
+    The schema intentionally captures only a leading enumerator.  It does not
+    decide an absolute H level: ``（一）`` may be H2, H3, or H4 depending on
+    the local section.  That decision is made from neighbouring title blocks.
+    """
+    compact = re.sub(r"\s+", "", str(text or ""))
+    decimal = heading_decimal_number(compact)
+    if decimal:
+        return {
+            "kind": f"decimal_{len(decimal)}",
+            "family": ("decimal",) + decimal[:-1],
+            "ordinal": decimal[-1],
+        }
+    match = re.match(r"^[（(]([一二三四五六七八九十]+)[）)]", compact)
+    if match:
+        return {"kind": "cn_paren", "family": ("cn_paren",), "ordinal": heading_chinese_ordinal(match.group(1))}
+    match = re.match(r"^[（(](\d+)[）)]", compact)
+    if match:
+        return {"kind": "arabic_paren", "family": ("arabic_paren",), "ordinal": int(match.group(1))}
+    match = re.match(r"^([一二三四五六七八九十]+)[、.．]", compact)
+    if match:
+        return {"kind": "cn_comma", "family": ("cn_comma",), "ordinal": heading_chinese_ordinal(match.group(1))}
+    match = re.match(r"^(\d+)[、.．]\s*", compact)
+    if match:
+        return {"kind": "arabic_dot", "family": ("arabic_dot",), "ordinal": int(match.group(1))}
+    match = re.match(r"^第([一二三四五六七八九十\d]+)条", compact)
+    if match:
+        ordinal = int(match.group(1)) if match.group(1).isdigit() else heading_chinese_ordinal(match.group(1))
+        return {"kind": "legal_article", "family": ("legal_article",), "ordinal": ordinal}
+    return None
+
+
+HEADING_SCHEMA_RECONCILIATION_WEIGHTS = {
+    "same_family_target": 3,
+    "consecutive_neighbour": 5,
+    "bidirectional_continuity": 4,
+    "decimal_parent": 5,
+    "indent_cluster": 2,
+    "conflicting_family": -4,
+}
+
+
+def reconcile_heading_schema_levels(
+    state: Dict[str, Any],
+    job_id: str,
+    persist_layout_jsonl: bool = True,
+) -> Dict[str, Any]:
+    """Repair H2/H3 titles using local numbered-sibling consistency.
+
+    This is a second document-level pass.  It only changes one level deeper
+    (H2→H3 or H3→H4) and requires two independent evidence families: a local
+    same-number-schema cluster plus either ordinal continuity, an explicit
+    decimal parent, or matching indentation.  It never uses an enumerator as
+    a global H-level rule, because the same marker is used at different depths
+    in contracts, reports, and financial statements.
+    """
+    pages = [dict(page) for page in state.get("pages", []) if isinstance(page, dict)]
+    for page in pages:
+        page["blocks"] = [dict(block) for block in page.get("blocks", []) if isinstance(block, dict)]
+
+    # Financial annual reports often use a visible “第X节” root, followed by
+    # Arabic items, Chinese-parenthesized items, and Arabic list items.  Some
+    # model outputs shift that entire chain one level shallow.  This is a
+    # deliberately narrow document-family repair; ordinary contracts and
+    # research reports do not enter this branch.
+    financial_events: List[Dict[str, Any]] = []
+    financial_root_pattern = re.compile(r"^第[一二三四五六七八九十]+节")
+    arabic_item_pattern = re.compile(r"^\d+[、]")
+    cn_paren_pattern = re.compile(r"^[（(][一二三四五六七八九十]+[）)]")
+    ordered_blocks: List[Tuple[int, Dict[str, Any]]] = []
+    for page_index, page in enumerate(pages):
+        page_id = int(page.get("page_id", page_index))
+        ordered_blocks.extend((page_id, block) for block in page["blocks"] if normalize_block_type(block.get("block_type") or block.get("label") or block.get("type"), "text") == "paragraph_title")
+    ordered_blocks.sort(key=lambda item: (item[0], int((item[1].get("bbox") or [0, 0])[1]), int((item[1].get("bbox") or [0, 0])[0])))
+    in_financial_section = False
+    seen_h2 = seen_h3 = False
+    for page_id, block in ordered_blocks:
+        text = re.sub(r"\s+", "", str(block.get("text") or ""))
+        old_rank = heading_level_rank(block.get("level"))
+        if financial_root_pattern.match(text):
+            in_financial_section, seen_h2, seen_h3 = True, False, False
+            continue
+        if not in_financial_section or old_rank is None:
+            continue
+        new_rank = old_rank
+        # A list-style H1 under “第X节” is a section child, not a new root.
+        if old_rank == 1 and arabic_item_pattern.match(text):
+            new_rank, seen_h2 = 2, True
+        elif old_rank == 2 and (cn_paren_pattern.match(text) or bool(re.match(r"^\d+\.\d+(?!\.)", text))) and seen_h2:
+            new_rank, seen_h3 = 3, True
+        elif old_rank == 3 and arabic_item_pattern.match(text) and seen_h3:
+            new_rank = 4
+        if new_rank != old_rank:
+            block["level"] = heading_rank_level(new_rank)
+            financial_events.append({"page_id": page_id, "block_id": str(block.get("id") or ""), "text": str(block.get("text") or "")[:80], "old_level": heading_rank_level(old_rank), "new_level": heading_rank_level(new_rank), "reason": "financial_section_hierarchy"})
+
+    # Build parent paths from every title, including unnumbered chapter names
+    # such as “第一节 …”.  Numbered-only candidates cannot supply a reliable
+    # chapter boundary by themselves.
+    all_headings: List[Dict[str, Any]] = []
+    for page_index, page in enumerate(pages):
+        page_id = int(page.get("page_id", page_index))
+        for block_index, block in enumerate(page["blocks"]):
+            if normalize_block_type(block.get("block_type") or block.get("label") or block.get("type"), "text") != "paragraph_title":
+                continue
+            rank = heading_level_rank(block.get("level"))
+            if not rank:
+                continue
+            all_headings.append({
+                "page_id": page_id,
+                "block_index": block_index,
+                "block": block,
+                "rank": rank,
+            })
+    all_headings.sort(key=lambda item: (
+        int(item["page_id"]),
+        int((item["block"].get("bbox") or [0, 0])[1]),
+        int((item["block"].get("bbox") or [0, 0])[0]),
+    ))
+    active_ancestors: Dict[int, Optional[str]] = {1: None, 2: None, 3: None}
+    scope_by_block: Dict[Tuple[int, int], Dict[str, Optional[str]]] = {}
+    for item in all_headings:
+        rank = int(item["rank"])
+        scope_by_block[(int(item["page_id"]), int(item["block_index"]))] = {
+            "h1": active_ancestors[1],
+            "h2": active_ancestors[2],
+        }
+        if rank in {1, 2, 3}:
+            block_id = str(item["block"].get("id") or f"p{item['page_id']}_b{item['block_index']}")
+            active_ancestors[rank] = block_id
+            for deeper_rank in range(rank + 1, 4):
+                active_ancestors[deeper_rank] = None
+
+    titles: List[Dict[str, Any]] = []
+    for page_index, page in enumerate(pages):
+        page_id = int(page.get("page_id", page_index))
+        for block_index, block in enumerate(page["blocks"]):
+            if normalize_block_type(block.get("block_type") or block.get("label") or block.get("type"), "text") != "paragraph_title":
+                continue
+            rank = heading_level_rank(block.get("level"))
+            schema = heading_number_schema(block.get("text"))
+            if not rank or not schema:
+                continue
+            scope = scope_by_block[(page_id, block_index)]
+            titles.append({
+                "page_index": page_index,
+                "block_index": block_index,
+                "page_id": page_id,
+                "block": block,
+                "rank": rank,
+                "schema": schema,
+                "left": heading_bbox_left(block),
+                "decimal": heading_decimal_number(block.get("text")),
+                "scope_h1": scope["h1"],
+                "scope_h2": scope["h2"],
+            })
+    titles.sort(key=lambda item: (
+        int(item["page_id"]),
+        int((item["block"].get("bbox") or [0, 0])[1]),
+        int((item["block"].get("bbox") or [0, 0])[0]),
+    ))
+
+    # Work from a snapshot.  A newly corrected title is deliberately not used
+    # as evidence for a later correction in this pass, preventing cascades.
+    snapshot = [dict(item) for item in titles]
+    def same_parent_scope(candidate: Dict[str, Any], other: Dict[str, Any], target_rank: int) -> bool:
+        # For H2→H3, the H1 chapter is the minimum safe boundary.  For
+        # H3→H4, require both the H1 chapter and the H2 parent to agree.
+        if candidate.get("scope_h1") != other.get("scope_h1"):
+            return False
+        if target_rank >= 4 and candidate.get("scope_h2") != other.get("scope_h2"):
+            return False
+        return candidate.get("scope_h1") is not None
+
+    events: List[Dict[str, Any]] = []
+    for index, item in enumerate(titles):
+        original_rank = int(item["rank"])
+        if original_rank not in {2, 3}:
+            continue
+        target_rank = original_rank + 1
+        schema = item["schema"]
+        nearby = [
+            other for other_index, other in enumerate(snapshot)
+            if other_index != index
+            and abs(other_index - index) <= 8
+            and abs(int(other["page_id"]) - int(item["page_id"])) <= 5
+            and other["schema"]["kind"] == schema["kind"]
+            and other["schema"]["family"] == schema["family"]
+            and same_parent_scope(item, other, target_rank)
+        ]
+        target_neighbours = [other for other in nearby if int(other["rank"]) == target_rank]
+        same_family_support = len(target_neighbours)
+        decimal = item["decimal"]
+        # A three-part decimal H2 with an explicit one-part H1 parent (for
+        # example 6.3 → 6.3.1) is a high-confidence H3 repair even when the
+        # model has not produced two correct H3 siblings yet.  Exclude date/
+        # year-like final segments such as 2.3.2026.
+        direct_root_parent = next((
+            other for other in reversed(snapshot[:index])
+            if decimal and len(decimal) >= 3 and decimal[-1] < 100
+            and other["decimal"] == decimal[:-1]
+            and int(other["rank"]) == 1
+            and int(item["page_id"]) - int(other["page_id"]) <= 1
+        ), None)
+        if same_family_support < 2 and not (original_rank == 2 and direct_root_parent):
+            continue
+
+        ordinal = schema.get("ordinal")
+        previous_continuous = any(
+            ordinal is not None
+            and other["schema"].get("ordinal") == ordinal - 1
+            and int(other["rank"]) == target_rank
+            for other in target_neighbours
+        )
+        following_continuous = any(
+            ordinal is not None
+            and other["schema"].get("ordinal") == ordinal + 1
+            and int(other["rank"]) == target_rank
+            for other in target_neighbours
+        )
+        decimal_parent = bool(direct_root_parent) or any(
+            item["decimal"]
+            and other["decimal"] == item["decimal"][:-1]
+            and int(other["rank"]) == target_rank - 1
+            and same_parent_scope(item, other, target_rank)
+            for other in snapshot
+        )
+        matching_indent = bool(
+            item["left"] is not None
+            and sum(
+                1 for other in target_neighbours
+                if other["left"] is not None and abs(float(other["left"]) - float(item["left"])) <= 36
+            ) >= 2
+        )
+        evidence = []
+        score = same_family_support * HEADING_SCHEMA_RECONCILIATION_WEIGHTS["same_family_target"]
+        if same_family_support:
+            evidence.append("local_number_family")
+        if direct_root_parent:
+            score += 12
+            evidence.append("direct_root_decimal_parent")
+        if previous_continuous:
+            score += HEADING_SCHEMA_RECONCILIATION_WEIGHTS["consecutive_neighbour"]
+            evidence.append("previous_ordinal")
+        if following_continuous:
+            score += HEADING_SCHEMA_RECONCILIATION_WEIGHTS["consecutive_neighbour"]
+            evidence.append("following_ordinal")
+        if previous_continuous and following_continuous:
+            score += HEADING_SCHEMA_RECONCILIATION_WEIGHTS["bidirectional_continuity"]
+        if decimal_parent:
+            score += HEADING_SCHEMA_RECONCILIATION_WEIGHTS["decimal_parent"]
+            evidence.append("decimal_parent")
+        if matching_indent:
+            score += HEADING_SCHEMA_RECONCILIATION_WEIGHTS["indent_cluster"]
+            evidence.append("indent_cluster")
+        conflicting = sum(1 for other in nearby if int(other["rank"]) == original_rank)
+        if conflicting > same_family_support:
+            score += HEADING_SCHEMA_RECONCILIATION_WEIGHTS["conflicting_family"]
+
+        # A local family is necessary but insufficient.  Require one structural
+        # corroborator and a margin high enough to reject isolated list items.
+        if (len(evidence) < 2 and not direct_root_parent) or score < 12:
+            continue
+        block = item["block"]
+        old_level = block.get("level")
+        new_level = heading_rank_level(target_rank)
+        block["level"] = new_level
+        events.append({
+            "page_id": item["page_id"],
+            "block_id": str(block.get("id") or ""),
+            "text": str(block.get("text") or "")[:80],
+            "old_level": old_level,
+            "new_level": new_level,
+            "score": score,
+            "same_family_support": same_family_support,
+            "parent_scope": {
+                "h1": item.get("scope_h1"),
+                "h2": item.get("scope_h2"),
+            },
+            "evidence": evidence,
+            "reason": "local_number_schema_consistency",
+        })
+
+    state = dict(state)
+    state["pages"] = pages
+    state["result"] = dict(state.get("result") or {})
+    state["result"]["blocks"] = collect_done_blocks(pages)
+    state["heading_schema_reconciliation"] = {
+        "enabled": True,
+        "weights": HEADING_SCHEMA_RECONCILIATION_WEIGHTS,
+        "changed_count": len(financial_events) + len(events),
+        "events": financial_events + events,
+    }
+    if events:
+        state["warnings"] = list(state.get("warnings") or []) + [
+            f"局部编号标题结构校正：修改 {len(events)} 个 paragraph_title 层级"
+        ]
+    if events and persist_layout_jsonl:
+        records = read_jsonl_records(layout_jsonl_path(job_id))
+        blocks_by_page = {int(page.get("page_id", index)): page.get("blocks", []) for index, page in enumerate(pages)}
+        for record in records:
+            page_id = int(record.get("page_id", -1))
+            if page_id in blocks_by_page:
+                record["blocks"] = blocks_by_page[page_id]
+        write_jsonl_records(layout_jsonl_path(job_id), records)
+    return state
+
+
+def reconcile_document_heading_levels(
+    state: Dict[str, Any],
+    job_id: str,
+    persist_layout_jsonl: bool = True,
+) -> Dict[str, Any]:
+    """Apply conservative *raise-only* H2→H3 / H3→H4 repair after a PDF.
+
+    A completed-document pass must not flatten an already deep model heading:
+    it can only raise a title by one level when strong local structure supports
+    it.  Only existing ``paragraph_title`` levels are changed; geometry, text,
+    block type, and ordering are never modified.
+    """
+    pages = [dict(page) for page in state.get("pages", []) if isinstance(page, dict)]
+    for page in pages:
+        page["blocks"] = [dict(block) for block in page.get("blocks", []) if isinstance(block, dict)]
+
+    titles: List[Tuple[int, int, Dict[str, Any]]] = []
+    for page_index, page in enumerate(pages):
+        page_id = int(page.get("page_id", page_index))
+        for block_index, block in enumerate(page.get("blocks", [])):
+            if normalize_block_type(block.get("block_type") or block.get("label") or block.get("type"), "text") != "paragraph_title":
+                continue
+            titles.append((page_index, block_index, block))
+    titles.sort(key=lambda item: (
+        int(pages[item[0]].get("page_id", item[0])),
+        int((item[2].get("bbox") or [0, 0])[1]),
+        int((item[2].get("bbox") or [0, 0])[0]),
+    ))
+
+    selected: List[Dict[str, Any]] = []
+    active_path: Dict[int, Dict[str, Any]] = {}
+    events: List[Dict[str, Any]] = []
+
+    def score_candidate(block: Dict[str, Any], candidate_rank: int) -> int:
+        original_rank = heading_level_rank(block.get("level"))
+        score = HEADING_RECONCILIATION_WEIGHTS["model_match"] if candidate_rank == original_rank else HEADING_RECONCILIATION_WEIGHTS["model_change"]
+        text = block.get("text")
+        decimal = heading_decimal_number(text)
+        current_page = int(block.get("page_id", 0))
+        previous = selected[-1] if selected else None
+
+        if heading_is_chapter_root(text):
+            score += HEADING_RECONCILIATION_WEIGHTS["chapter_root"] if candidate_rank == 1 else -HEADING_RECONCILIATION_WEIGHTS["chapter_root"]
+
+        if decimal:
+            parent = next((item for item in reversed(selected) if item.get("decimal") == decimal[:-1]), None)
+            if parent:
+                expected_rank = int(parent["rank"]) + 1
+                if candidate_rank == expected_rank:
+                    score += HEADING_RECONCILIATION_WEIGHTS["direct_parent_match"]
+                    if int(parent["page_id"]) != current_page:
+                        score += HEADING_RECONCILIATION_WEIGHTS["cross_page_parent"]
+                else:
+                    score += HEADING_RECONCILIATION_WEIGHTS["direct_parent_conflict"]
+            elif candidate_rank >= 3:
+                score += HEADING_RECONCILIATION_WEIGHTS["missing_parent_deep_level"]
+
+            sibling = next((item for item in reversed(selected) if item.get("decimal") and item["decimal"][:-1] == decimal[:-1]), None)
+            if sibling and len(decimal) == len(sibling["decimal"]):
+                if candidate_rank == int(sibling["rank"]):
+                    score += HEADING_RECONCILIATION_WEIGHTS["sibling_match"]
+                    if int(sibling["page_id"]) != current_page:
+                        score += HEADING_RECONCILIATION_WEIGHTS["cross_page_sibling"]
+                else:
+                    score += HEADING_RECONCILIATION_WEIGHTS["sibling_conflict"]
+
+            # Segment count is only a soft hint.  In particular, documents
+            # frequently use a visually nested ``2.3`` as H3 instead of H2.
+            # Therefore it may contribute only after a same-depth sibling or
+            # an explicit numeric parent has supplied structural evidence.
+            if (parent or sibling) and candidate_rank == min(max(len(decimal), 2), 4):
+                score += HEADING_RECONCILIATION_WEIGHTS["decimal_relative_depth"]
+
+        deepest_rank = max(active_path) if active_path else 0
+        if candidate_rank == 1:
+            score += HEADING_RECONCILIATION_WEIGHTS["legal_ascend"] if previous else 0
+        elif deepest_rank == 0:
+            score += HEADING_RECONCILIATION_WEIGHTS["missing_parent_deep_level"] if candidate_rank >= 3 else 0
+        elif candidate_rank <= deepest_rank:
+            score += HEADING_RECONCILIATION_WEIGHTS["legal_same_level"] if candidate_rank == deepest_rank else HEADING_RECONCILIATION_WEIGHTS["legal_ascend"]
+        elif candidate_rank == deepest_rank + 1:
+            score += HEADING_RECONCILIATION_WEIGHTS["legal_descend"]
+        elif candidate_rank == deepest_rank + 2:
+            score += HEADING_RECONCILIATION_WEIGHTS["skip_one_level"]
+        else:
+            score += HEADING_RECONCILIATION_WEIGHTS["skip_two_levels"]
+
+        left = heading_bbox_left(block)
+        if left is not None:
+            same_level = [item for item in selected if int(item["rank"]) == candidate_rank and item.get("left") is not None]
+            if same_level:
+                reference_left = float(same_level[-1]["left"])
+                score += HEADING_RECONCILIATION_WEIGHTS["same_level_indent"] if abs(left - reference_left) <= 36 else HEADING_RECONCILIATION_WEIGHTS["indent_conflict"]
+            parent = active_path.get(candidate_rank - 1)
+            if parent and parent.get("left") is not None:
+                score += HEADING_RECONCILIATION_WEIGHTS["deeper_indent"] if left >= float(parent["left"]) - 12 else HEADING_RECONCILIATION_WEIGHTS["indent_conflict"]
+        return score
+
+    for page_index, block_index, block in titles:
+        original_rank = heading_level_rank(block.get("level"))
+        current_page_id = int(pages[page_index].get("page_id", page_index))
+        scored = [(rank, score_candidate(block, rank)) for rank in range(1, 5)]
+        scored.sort(key=lambda item: (item[1], item[0] == original_rank), reverse=True)
+        selected_rank, best_score = scored[0]
+        runner_up_score = scored[1][1]
+        confidence_margin = best_score - runner_up_score
+        decimal = heading_decimal_number(block.get("text"))
+        explicit_parent = (
+            next((item for item in reversed(selected) if decimal and item.get("decimal") == decimal[:-1]), None)
+            if decimal
+            else None
+        )
+        same_depth_sibling = (
+            next(
+                (
+                    item
+                    for item in reversed(selected)
+                    if decimal
+                    and item.get("decimal")
+                    and len(item["decimal"]) == len(decimal)
+                    and item["decimal"][:-1] == decimal[:-1]
+                ),
+                None,
+            )
+            if decimal
+            else None
+        )
+        recent_same_depth_sibling = bool(
+            same_depth_sibling
+            and current_page_id - int(same_depth_sibling["page_id"]) <= 3
+        )
+        # This pass is deliberately raise-only: prior full-document scoring
+        # showed that H3→H2/H4→H3 flattening harms visual heading systems where
+        # numbering depth does not equal the document's absolute H level.  A
+        # repair must be exactly one level deeper and have strong nearby
+        # structural support.
+        is_one_level_raise = original_rank in {2, 3} and selected_rank == original_rank + 1
+        if (
+            original_rank
+            and selected_rank != original_rank
+            and (
+                not is_one_level_raise
+                or confidence_margin < 6
+                or not (explicit_parent or recent_same_depth_sibling)
+            )
+        ):
+            selected_rank = original_rank
+            best_score = next(score for rank, score in scored if rank == original_rank)
+
+        final_level = heading_rank_level(selected_rank)
+        old_level = block.get("level")
+        block["level"] = final_level
+        page_id = current_page_id
+        record = {
+            "rank": selected_rank,
+            "decimal": heading_decimal_number(block.get("text")),
+            "page_id": page_id,
+            "left": heading_bbox_left(block),
+        }
+        active_path = {rank: value for rank, value in active_path.items() if rank < selected_rank}
+        active_path[selected_rank] = record
+        selected.append(record)
+        if old_level != final_level:
+            events.append({
+                "page_id": page_id,
+                "block_id": str(block.get("id") or ""),
+                "text": str(block.get("text") or "")[:80],
+                "old_level": old_level,
+                "new_level": final_level,
+                "score": best_score,
+                "margin": confidence_margin,
+                "reason": "high_confidence_heading_raise",
+            })
+
+    state = dict(state)
+    state["pages"] = pages
+    state["result"] = dict(state.get("result") or {})
+    state["result"]["blocks"] = collect_done_blocks(pages)
+    state["heading_reconciliation"] = {
+        "enabled": True,
+        "weights": HEADING_RECONCILIATION_WEIGHTS,
+        "changed_count": len(events),
+        "events": events,
+    }
+    if events:
+        state["warnings"] = list(state.get("warnings") or []) + [
+            f"全文标题加权校正：修改 {len(events)} 个 paragraph_title 层级"
+        ]
+    if events and persist_layout_jsonl:
+        records = read_jsonl_records(layout_jsonl_path(job_id))
+        blocks_by_page = {int(page.get("page_id", index)): page.get("blocks", []) for index, page in enumerate(pages)}
+        for record in records:
+            page_id = int(record.get("page_id", -1))
+            if page_id in blocks_by_page:
+                record["blocks"] = blocks_by_page[page_id]
+        write_jsonl_records(layout_jsonl_path(job_id), records)
+    return state
+
+
+DEEP_HEADING_ENUMERATION_PATTERN = re.compile(
+    r"^(?:\d+(?:[.．]\d+){1,}|[（(][一二三四五六七八九十\d]+[)）]|\d+[、.)）])"
+)
+
+
+def deep_heading_review_candidate(block: Dict[str, Any]) -> bool:
+    """Select only titles with a plausible one-level-deeper interpretation."""
+    rank = heading_level_rank(block.get("level"))
+    if rank not in {2, 3}:
+        return False
+    text = re.sub(r"\s+", "", str(block.get("text") or ""))
+    decimal = heading_decimal_number(text)
+    # A 3.1.1-style title output as H2 is an especially useful H3 candidate.
+    if rank == 2 and decimal and len(decimal) >= 3:
+        return True
+    # Parenthesized and list-number headings often form the visual H3/H4
+    # layer in reports. Their absolute level is intentionally delegated to
+    # the image review instead of a global regex rule.
+    return bool(DEEP_HEADING_ENUMERATION_PATTERN.match(text))
+
+
+def deep_heading_review_has_parent_support(titles: List[Dict[str, Any]], target_index: int) -> bool:
+    """Require an actual nearby parent signal before spending a visual review.
+
+    The first review experiment showed that a parenthesized marker alone is
+    heavily over-inclusive.  A candidate now needs either an explicit numeric
+    parent at the current level, or a visually less-indented same-level title
+    on the same page.  The latter preserves the useful H3→H4 list pattern.
+    """
+    target = titles[target_index]
+    target_rank = heading_level_rank(target.get("level"))
+    target_decimal = heading_decimal_number(target.get("text"))
+    target_left = heading_bbox_left(target)
+    target_page = int(target.get("page_id", 0))
+    for previous in reversed(titles[:target_index]):
+        previous_rank = heading_level_rank(previous.get("level"))
+        if (
+            target_decimal
+            and heading_decimal_number(previous.get("text")) == target_decimal[:-1]
+            and previous_rank == target_rank
+        ):
+            return True
+        if int(previous.get("page_id", -1)) != target_page:
+            continue
+        previous_left = heading_bbox_left(previous)
+        if previous_rank == target_rank and target_left is not None and previous_left is not None and target_left >= previous_left + 24:
+            return True
+    return False
+
+
+def pil_image_to_data_url(image: Image.Image) -> str:
+    buffer = BytesIO()
+    image.save(buffer, format="PNG")
+    encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
+
+
+def heading_review_strip(page_path: Path, block: Dict[str, Any]) -> str:
+    """Return a full-width local strip so the model can compare indentation.
+
+    The strip retains the left margin and nearby rows; cropping to the text
+    box alone would erase the strongest visual hierarchy signal.
+    """
+    bbox = block.get("bbox") or [0, 0, 0, 0]
+    try:
+        y1, y2 = float(bbox[1]), float(bbox[3])
+    except (IndexError, TypeError, ValueError):
+        y1, y2 = 0.0, 0.0
+    with Image.open(page_path) as source:
+        image = source.convert("RGB")
+        top = max(0, int(y1) - 240)
+        bottom = min(image.height, max(int(y2) + 240, top + 320))
+        strip = image.crop((0, top, image.width, bottom))
+        if strip.width > 1280:
+            ratio = 1280 / strip.width
+            strip = strip.resize((1280, max(1, round(strip.height * ratio))), Image.Resampling.LANCZOS)
+        return pil_image_to_data_url(strip)
+
+
+def heading_review_context(titles: List[Dict[str, Any]], target_index: int) -> str:
+    lower = max(0, target_index - 3)
+    upper = min(len(titles), target_index + 4)
+    lines = []
+    for index in range(lower, upper):
+        item = titles[index]
+        marker = "目标" if index == target_index else "邻近"
+        lines.append(
+            f"{marker}: page {int(item['page_id']) + 1}; 当前={item.get('level')}; "
+            f"文本={str(item.get('text') or '')[:120]}"
+        )
+    return "\n".join(lines)
+
+
+def parse_deep_heading_review(content: str) -> Tuple[Optional[bool], float]:
+    cleaned = strip_think_prefix(content).strip()
+    match = re.search(r"\{.*?\}", cleaned, flags=re.DOTALL)
+    try:
+        payload = json.loads(match.group(0) if match else cleaned)
+    except json.JSONDecodeError:
+        return None, 0.0
+    decision = str(payload.get("decision") or "").strip().upper()
+    try:
+        confidence = float(payload.get("confidence") or 0)
+    except (TypeError, ValueError):
+        confidence = 0.0
+    if decision not in {"KEEP", "DEEPER"}:
+        return None, confidence
+    return decision == "DEEPER", min(max(confidence, 0.0), 1.0)
+
+
+def call_deep_heading_review(
+    image_url: str,
+    target: Dict[str, Any],
+    context: str,
+    config: LLMConfig,
+) -> Tuple[Optional[bool], float, str]:
+    current_level = str(target.get("level") or "")
+    deeper_level = heading_rank_level(heading_level_rank(current_level) + 1)
+    system = (
+        "你是文档标题层级复核器。只依据给定的局部页面图像、左侧缩进、字号/样式、"
+        "编号与邻近标题判断目标标题是否应比当前层级深一级。不要重写文本，不要猜测"
+        "没有视觉或上下文证据的层级。只输出 JSON。"
+    )
+    instruction = (
+        f"目标标题当前为 {current_level}，唯一可选修改是升为 {deeper_level}。\n"
+        f"目标文本：{str(target.get('text') or '')[:180]}\n"
+        f"邻近标题上下文：\n{context}\n\n"
+        "若图像和上下文明确表明目标比当前层级深一级，输出 "
+        '{"decision":"DEEPER","confidence":0.00}；否则输出 '
+        '{"decision":"KEEP","confidence":0.00}。confidence 必须是 0 到 1。'
+    )
+    client = OpenAI(api_key=config.api_key or "EMPTY", base_url=config.base_url)
+    completion = client.chat.completions.create(
+        model=config.model,
+        messages=[
+            {"role": "system", "content": system},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": image_url}},
+                    {"type": "text", "text": instruction},
+                ],
+            },
+        ],
+        timeout=config.timeout,
+        max_tokens=96,
+        extra_body={"enable_thinking": False, "chat_template_kwargs": {"enable_thinking": False}},
+    )
+    content = completion.choices[0].message.content if completion.choices else ""
+    decision, confidence = parse_deep_heading_review(content or "")
+    return decision, confidence, content or ""
+
+
+def review_deep_heading_candidates(
+    state: Dict[str, Any],
+    job_id: str,
+    llm_config: LLMConfig,
+) -> Dict[str, Any]:
+    """Visually recheck bounded H2/H3 candidates after normal page inference.
+
+    This is intentionally separate from the purely structural reconciliation:
+    a review may only deepen one existing title level, and needs a high model
+    confidence to apply.  It never tries to create missing title blocks.
+    """
+    state = dict(state)
+    pages = [dict(page) for page in state.get("pages", []) if isinstance(page, dict)]
+    for page in pages:
+        page["blocks"] = [dict(block) for block in page.get("blocks", []) if isinstance(block, dict)]
+    titles: List[Dict[str, Any]] = []
+    for page_index, page in enumerate(pages):
+        page_id = int(page.get("page_id", page_index))
+        for block in page["blocks"]:
+            if normalize_block_type(block.get("block_type") or block.get("label") or block.get("type"), "text") != "paragraph_title":
+                continue
+            block["page_id"] = page_id
+            titles.append(block)
+    titles.sort(key=lambda block: (
+        int(block.get("page_id", 0)),
+        int((block.get("bbox") or [0, 0])[1]),
+        int((block.get("bbox") or [0, 0])[0]),
+    ))
+    candidates = [
+        (index, block)
+        for index, block in enumerate(titles)
+        if deep_heading_review_candidate(block) and deep_heading_review_has_parent_support(titles, index)
+    ][:layout_deep_heading_review_limit()]
+    events: List[Dict[str, Any]] = []
+    reviewed: List[Dict[str, Any]] = []
+    job_dir = find_job_dir(job_id)
+    for title_index, block in candidates:
+        page_path = job_dir / "pages" / f"page_{int(block['page_id']):03d}.png"
+        if not page_path.is_file():
+            reviewed.append({"block_id": str(block.get("id") or ""), "status": "skipped_missing_page"})
+            continue
+        try:
+            decision, confidence, _raw = call_deep_heading_review(
+                heading_review_strip(page_path, block),
+                block,
+                heading_review_context(titles, title_index),
+                llm_config,
+            )
+        except Exception as exc:
+            reviewed.append({"block_id": str(block.get("id") or ""), "status": f"review_error:{type(exc).__name__}"})
+            continue
+        old_level = str(block.get("level") or "")
+        new_level = heading_rank_level(heading_level_rank(old_level) + 1)
+        applied = bool(decision and confidence >= 0.90 and heading_level_rank(old_level) in {2, 3})
+        reviewed.append({
+            "page_id": int(block["page_id"]),
+            "block_id": str(block.get("id") or ""),
+            "text": str(block.get("text") or "")[:80],
+            "old_level": old_level,
+            "proposed_level": new_level,
+            "decision": "DEEPER" if decision else "KEEP" if decision is False else "INVALID",
+            "confidence": confidence,
+            "applied": applied,
+        })
+        if applied:
+            block["level"] = new_level
+            events.append({**reviewed[-1], "new_level": new_level, "reason": "local_visual_deep_heading_review"})
+    state["pages"] = pages
+    state["result"] = dict(state.get("result") or {})
+    state["result"]["blocks"] = collect_done_blocks(pages)
+    state["deep_heading_review"] = {
+        "enabled": True,
+        "candidate_count": len(candidates),
+        "reviewed_count": len(reviewed),
+        "changed_count": len(events),
+        "events": events,
+        "reviews": reviewed,
+    }
+    if events:
+        state["warnings"] = list(state.get("warnings") or []) + [
+            f"局部视觉深层标题复核：修改 {len(events)} 个 paragraph_title 层级"
+        ]
+        records = read_jsonl_records(layout_jsonl_path(job_id))
+        blocks_by_page = {int(page.get("page_id", index)): page.get("blocks", []) for index, page in enumerate(pages)}
+        for record in records:
+            page_id = int(record.get("page_id", -1))
+            if page_id in blocks_by_page:
+                record["blocks"] = blocks_by_page[page_id]
+        write_jsonl_records(layout_jsonl_path(job_id), records)
+    return state
+
+
+def infer_page(
+    job_id: str,
+    page: PageImage,
+    llm_config: LLMConfig,
+    resize_config: VisionResizeConfig,
+    prompt_template: PromptTemplate,
+    heading_context: str,
+) -> Tuple[ModelPageImage, Dict[str, Any], Dict[str, str], str]:
+    job_dir = find_job_dir(job_id)
+    model_page = resize_page_for_model(page, job_dir=job_dir, config=resize_config)
+    payload, model_input, model_response = call_layout_llm(
+        model_page,
+        original_page=page,
+        config=llm_config,
+        prompt_template=prompt_template,
+        heading_context=heading_context,
+        image_profile=resize_config.image_profile,
+    )
+    return model_page, payload, model_input, model_response
+
+
+def commit_page_inference(
+    job_id: str,
+    page: PageImage,
+    future: Future[Tuple[ModelPageImage, Dict[str, Any], Dict[str, str], str]],
+    started_at: float,
+    resize_config: VisionResizeConfig,
+    prior_blocks_override: Optional[List[Dict[str, Any]]] = None,
+) -> None:
+    model_page: Optional[ModelPageImage] = None
+    try:
+        model_page, payload, model_input, model_response = future.result()
+        state = read_job_result(job_id)
+        # Staggered inference may already have committed a later odd page. A
+        # future page is useful as prompt reference but must never become part
+        # of the current page's active hierarchy path during normalization.
+        if prior_blocks_override is None:
+            prior_blocks = [
+                block
+                for block in state["result"].get("blocks", [])
+                if isinstance(block, dict) and int(block.get("page_id", -1)) < page.page_id
+            ]
+        else:
+            # Take a defensive copy because the state is rewritten after each
+            # page and all trailing pages must see exactly the same anchor.
+            prior_blocks = [dict(block) for block in prior_blocks_override]
+        blocks, block_warnings = normalize_blocks(
+            payload,
+            model_page=model_page,
+            original_page=page,
+            prior_blocks=prior_blocks,
+            image_profile=resize_config.image_profile,
+        )
+        job_dir = find_job_dir(job_id)
+        layout_page = layout_page_from_analysis(page, model_page, blocks, job_dir)
+        upsert_jsonl_record(
+            qa_jsonl_path(job_id),
+            qna_entry_from_page(page.page_id, layout_page["model_image_path"], model_input, model_response),
+        )
+        upsert_jsonl_record(layout_jsonl_path(job_id), layout_page)
+
+        state["pages"][page.page_id].update(
+            {
+                "status": "done",
+                "blocks": layout_page["blocks"],
+                "raw": payload,
+                "model_input": model_input,
+                "model_image_url": layout_page["model_image_url"],
+                "model_width": layout_page["model_width"],
+                "model_height": layout_page["model_height"],
+                "model_content_bbox": layout_page["model_content_bbox"],
+                "elapsed_time": round(time.time() - started_at, 2),
+            }
+        )
+        state["result"]["blocks"] = collect_done_blocks(state["pages"])
+        state["warnings"].extend(block_warnings)
+        state["completed_pages"] = count_finished_pages(state["pages"])
+        write_job_result(job_id, state)
+    except Exception as exc:
+        err = f"第 {page.page_id + 1} 页分析失败: {type(exc).__name__}: {exc}"
+        state = read_job_result(job_id)
+        page_update = {
+            "status": "error",
+            "blocks": [],
+            "raw": None,
+            "error": err,
+            "elapsed_time": round(time.time() - started_at, 2),
+        }
+        if model_page is not None:
+            page_update.update(
+                {
+                    "model_image_url": model_page.image_url,
+                    "model_width": model_page.width,
+                    "model_height": model_page.height,
+                    "model_content_bbox": [
+                        model_page.content_x,
+                        model_page.content_y,
+                        model_page.content_x + model_page.content_width,
+                        model_page.content_y + model_page.content_height,
+                    ],
+                }
+            )
+        state["pages"][page.page_id].update(page_update)
+        state["errors"].append(err)
+        state["completed_pages"] = count_finished_pages(state["pages"])
+        write_job_result(job_id, state)
 
 
 def collect_done_blocks(pages: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:

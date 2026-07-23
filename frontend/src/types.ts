@@ -140,6 +140,7 @@ export type BackendBlockType =
   | 'formula'
   | 'chart'
   | 'flowchart'
+  | 'diagram'
   | 'image'
   | 'vision_footnote'
   | 'header'
@@ -167,6 +168,7 @@ export interface BackendPage {
   status?: string;
   blocks?: BackendBlock[];
   error?: string;
+  elapsed_time?: number;
 }
 
 export interface BackendJob {

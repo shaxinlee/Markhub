@@ -76,6 +76,7 @@ const DEFAULT_LABEL_TYPES = [
   'formula',
   'chart',
   'flowchart',
+  'diagram',
   'image',
   'caption',
   'vision_footnote',

@@ -152,8 +152,9 @@ export default function App() {
       alert('该标注功能未上线');
       return;
     }
-    const targetProject = projects[0] || createLayoutDraftProject();
-    setSelectedProject(targetProject);
+    setSelectedProject(createLayoutDraftProject());
+    setSelectedDatasetId(null);
+    setBoundingBoxDatasetId(null);
     setActiveScreen('workspace');
   };
 

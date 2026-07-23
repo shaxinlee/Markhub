@@ -38,6 +38,17 @@ EXTRA_LABEL = "__extra__"
 FAILED_PAGE_PATTERN = re.compile(r"第\s*(\d+)\s*页")
 DEFAULT_BBOX_EXEMPT_LABELS = ("footer",)
 DEFAULT_LABEL_ONLY_LABELS = ("header",)
+AMBIGUOUS_FLOWCHART_ACCEPT_LABELS = ("flowchart", "image", "text")
+AMBIGUOUS_FLOWCHART_MIN_COVERAGE = 0.10
+DEFAULT_AMBIGUOUS_FLOWCHART_PAGES = {
+    ("东方财富_深度研究：国内消防安全领军者，出海+工业消防打造第二增长曲线_【发现报告 fxbaogao.com】", 4),
+    ("东方财富_深度研究：国内消防安全领军者，出海+工业消防打造第二增长曲线_【发现报告 fxbaogao.com】", 5),
+    ("招商证券", 10),
+    ("招商证券", 38),
+    ("招商证券", 39),
+    ("招商证券", 62),
+    ("浙商证券_【电子皮肤】行业深度：具身智能感知核心_【发现报告 fxbaogao.com】", 12),
+}
 
 
 def normalize_label(block: Dict[str, Any]) -> str:
@@ -319,6 +330,58 @@ def filter_excluded_pages(blocks: List[Dict[str, Any]], excluded_pages: set) -> 
     return [block for block in blocks if block["page_id"] not in excluded_pages]
 
 
+def flexible_flowchart_matches(
+    job_id: str,
+    gt_blocks: List[Dict[str, Any]],
+    pred_blocks: List[Dict[str, Any]],
+    ambiguous_pages: set,
+) -> Tuple[Dict[int, Tuple[int, float, float]], set, set]:
+    """Accept non-typical flowchart pages as flowchart/image/text.
+
+    Some annotated flowchart regions are really infographics, structured text
+    cards, or schematic images rather than classic node-arrow flowcharts.  For
+    a small reviewed allow-list, count a prediction as correct when it covers
+    the GT flowchart region well and uses one of the acceptable coarse labels.
+    """
+    if not ambiguous_pages:
+        return {}, set(), set()
+    allowed_labels = set(AMBIGUOUS_FLOWCHART_ACCEPT_LABELS)
+    matched: Dict[int, Tuple[int, float, float]] = {}
+    used_pred = set()
+    for gt_index, gt in enumerate(gt_blocks):
+        if gt["label"] != "flowchart":
+            continue
+        if (job_id, gt["page_id"]) not in ambiguous_pages:
+            continue
+        candidates = []
+        for pred_index, pred in enumerate(pred_blocks):
+            if pred_index in used_pred:
+                continue
+            if pred["page_id"] != gt["page_id"] or pred["label"] not in allowed_labels:
+                continue
+            coverage, iou = bbox_metrics(gt["bbox"], pred["bbox"])
+            if coverage > 0:
+                candidates.append((coverage, iou, pred_index, pred["bbox"]))
+        if not candidates:
+            continue
+        union_coverage = bbox_coverage_by_group(
+            gt["bbox"],
+            [bbox for _coverage, _iou, _pred_index, bbox in candidates],
+        )
+        if max(coverage for coverage, _iou, _pred_index, _bbox in candidates) < AMBIGUOUS_FLOWCHART_MIN_COVERAGE:
+            continue
+        coverage, iou, pred_index, _bbox = max(candidates)
+        coverage = max(coverage, union_coverage)
+        matched[gt_index] = (pred_index, coverage, iou)
+        # Mark all accepted overlapping predictions as correct so text-split
+        # renderings of a non-typical flowchart are not counted as false
+        # positives.  The one best pred above is retained only for the
+        # one-to-one matched bookkeeping.
+        for _coverage, _iou, candidate_pred_index, _candidate_bbox in candidates:
+            used_pred.add(candidate_pred_index)
+    return matched, set(matched), used_pred
+
+
 def region_correct_indices(
     gt_blocks: List[Dict[str, Any]],
     pred_blocks: List[Dict[str, Any]],
@@ -461,6 +524,7 @@ def evaluate_file_maps(
     excluded_pages: Optional[Dict[str, set]] = None,
     bbox_exempt_labels: Tuple[str, ...] = DEFAULT_BBOX_EXEMPT_LABELS,
     label_only_labels: Tuple[str, ...] = DEFAULT_LABEL_ONLY_LABELS,
+    allow_ambiguous_flowchart: bool = False,
 ) -> Dict[str, Any]:
     validate_threshold("min_iou", min_iou)
     validate_threshold("min_region_coverage", min_region_coverage)
@@ -543,6 +607,14 @@ def evaluate_file_maps(
         )
         matched.update(label_matches)
         used_pred.update(label_used_pred)
+        flexible_flowchart_matched, flexible_flowchart_gt, flexible_flowchart_pred = flexible_flowchart_matches(
+            job_id,
+            gt_blocks,
+            pred_blocks,
+            ambiguous_pages=DEFAULT_AMBIGUOUS_FLOWCHART_PAGES if allow_ambiguous_flowchart else set(),
+        )
+        matched.update(flexible_flowchart_matched)
+        used_pred.update(flexible_flowchart_pred)
         grouped_correct_gt, grouped_correct_pred = region_correct_indices(
             gt_blocks,
             pred_blocks,
@@ -589,6 +661,10 @@ def evaluate_file_maps(
         correct_pred = strict_correct_pred | grouped_correct_pred | bbox_exempt_pred
         correct_level_gt = strict_level_gt | grouped_level_gt | bbox_exempt_gt
         correct_level_pred = strict_level_pred | grouped_level_pred | bbox_exempt_pred
+        correct_gt.update(flexible_flowchart_gt)
+        correct_pred.update(flexible_flowchart_pred)
+        correct_level_gt.update(flexible_flowchart_gt)
+        correct_level_pred.update(flexible_flowchart_pred)
 
         for pred_index, pred in enumerate(pred_blocks):
             pred_label = pred["label"]
@@ -723,6 +799,10 @@ def evaluate_file_maps(
         "min_region_coverage": min_region_coverage,
         "bbox_exempt_labels": bbox_exempt_labels,
         "label_only_labels": label_only_labels,
+        "allow_ambiguous_flowchart": allow_ambiguous_flowchart,
+        "ambiguous_flowchart_pages": sorted(
+            f"{job_id}:p{page_id + 1}" for job_id, page_id in DEFAULT_AMBIGUOUS_FLOWCHART_PAGES
+        ) if allow_ambiguous_flowchart else [],
     }
 
 
@@ -735,6 +815,7 @@ def evaluate_annotation_roots(
     excluded_pages: Optional[Dict[str, set]] = None,
     bbox_exempt_labels: Tuple[str, ...] = DEFAULT_BBOX_EXEMPT_LABELS,
     label_only_labels: Tuple[str, ...] = DEFAULT_LABEL_ONLY_LABELS,
+    allow_ambiguous_flowchart: bool = False,
 ) -> Dict[str, Any]:
     gt_files = discover_second_annotation_files(ground_truth_root) or json_files_by_job(ground_truth_root)
     pred_files = discover_first_annotation_files(model_pre_root) or json_files_by_job(model_pre_root)
@@ -747,6 +828,7 @@ def evaluate_annotation_roots(
         excluded_pages=excluded_pages,
         bbox_exempt_labels=bbox_exempt_labels,
         label_only_labels=label_only_labels,
+        allow_ambiguous_flowchart=allow_ambiguous_flowchart,
     )
 
     category_jobs: Dict[str, List[str]] = defaultdict(list)
@@ -770,6 +852,7 @@ def evaluate_annotation_roots(
                 excluded_pages=excluded_pages,
                 bbox_exempt_labels=bbox_exempt_labels,
                 label_only_labels=label_only_labels,
+                allow_ambiguous_flowchart=allow_ambiguous_flowchart,
             )
     return result
 
@@ -826,6 +909,7 @@ def evaluate(
     excluded_pages: Optional[Dict[str, set]] = None,
     bbox_exempt_labels: Tuple[str, ...] = DEFAULT_BBOX_EXEMPT_LABELS,
     label_only_labels: Tuple[str, ...] = DEFAULT_LABEL_ONLY_LABELS,
+    allow_ambiguous_flowchart: bool = False,
 ) -> Dict[str, Any]:
     gt_root = os.path.join(datasets_dir, "ground_truth")
     pred_root = prediction_dir if os.path.isabs(prediction_dir) else os.path.join(datasets_dir, prediction_dir)
@@ -843,6 +927,7 @@ def evaluate(
         excluded_pages=excluded_pages,
         bbox_exempt_labels=bbox_exempt_labels,
         label_only_labels=label_only_labels,
+        allow_ambiguous_flowchart=allow_ambiguous_flowchart,
     )
 
 
@@ -1058,6 +1143,8 @@ def result_to_jsonable(r: Dict[str, Any]) -> Dict[str, Any]:
         "min_region_coverage": r["min_region_coverage"],
         "bbox_exempt_labels": list(r["bbox_exempt_labels"]),
         "label_only_labels": list(r["label_only_labels"]),
+        "allow_ambiguous_flowchart": bool(r.get("allow_ambiguous_flowchart")),
+        "ambiguous_flowchart_pages": list(r.get("ambiguous_flowchart_pages") or []),
         "matching": {
             "detection_method": "greedy_one_to_one_highest_iou",
             "label_method": "same_label_content_or_bidirectional_region_coverage",
@@ -1066,6 +1153,8 @@ def result_to_jsonable(r: Dict[str, Any]) -> Dict[str, Any]:
             "min_region_coverage": r["min_region_coverage"],
             "bbox_exempt_labels": list(r["bbox_exempt_labels"]),
             "label_only_labels": list(r["label_only_labels"]),
+            "allow_ambiguous_flowchart": bool(r.get("allow_ambiguous_flowchart")),
+            "ambiguous_flowchart_pages": list(r.get("ambiguous_flowchart_pages") or []),
         },
         "detection": {
             "precision": detection_precision,
@@ -1134,6 +1223,14 @@ def main() -> None:
         metavar="PREDICTION_DIR",
         help="读取该预测目录的失败页，并从所有模型的 GT/预测中统一排除；可重复指定",
     )
+    parser.add_argument(
+        "--allow-ambiguous-flowchart",
+        action="store_true",
+        help=(
+            "对已人工确认的非典型 flowchart 页面放宽评估："
+            "预测为 flowchart/image/text 且区域覆盖达标都算正确"
+        ),
+    )
     parser.add_argument("--json", metavar="PATH", help="可选: 将结果以 JSON 写入该文件")
     args = parser.parse_args()
 
@@ -1157,6 +1254,7 @@ def main() -> None:
             min_iou=args.min_iou,
             min_region_coverage=args.min_region_coverage,
             excluded_pages=excluded_pages,
+            allow_ambiguous_flowchart=args.allow_ambiguous_flowchart,
         )
     else:
         result = evaluate(
@@ -1166,6 +1264,7 @@ def main() -> None:
             min_iou=args.min_iou,
             min_region_coverage=args.min_region_coverage,
             excluded_pages=excluded_pages,
+            allow_ambiguous_flowchart=args.allow_ambiguous_flowchart,
         )
     print_report(result)
     if args.json:

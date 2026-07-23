@@ -18,6 +18,8 @@ from features.layout_analysis.service import (  # noqa: E402
     normalize_export_block,
     normalize_heading_level,
     parse_model_json,
+    reconcile_document_heading_levels,
+    reconcile_heading_schema_levels,
     repair_heading_level_continuity,
     strip_think_prefix,
 )
@@ -67,6 +69,83 @@ def main() -> None:
     )
     assert_true(repaired_after_reset[0]["level"] == "H2", "回到新的 H1 后，后续 H3 应按当前路径降级为 H2")
     assert_true(reset_warnings, "回到 H1 后的跳级降级应产生提示")
+
+    reconciliation_state = {
+        "pages": [
+            {"page_id": 0, "blocks": [
+                {"id": "h1", "block_type": "paragraph_title", "level": "H1", "text": "第三章 项目实施", "bbox": [40, 10, 400, 40]},
+                {"id": "h2", "block_type": "paragraph_title", "level": "H2", "text": "3.1 系统建设", "bbox": [70, 60, 400, 90]},
+                {"id": "keep_h4", "block_type": "paragraph_title", "level": "H4", "text": "3.1.1 平台性能要求", "bbox": [100, 110, 500, 140]},
+                {"id": "wrong_h2", "block_type": "paragraph_title", "level": "H2", "text": "3.1.2 安全性要求", "bbox": [100, 160, 500, 190]},
+                {"id": "wrong_h3", "block_type": "paragraph_title", "level": "H3", "text": "3.1.2.1 数据加密要求", "bbox": [130, 210, 500, 240]},
+            ]}
+        ],
+        "result": {"blocks": []},
+        "warnings": [],
+    }
+    reconciled = reconcile_document_heading_levels(
+        reconciliation_state,
+        "missing-job-for-unit-test",
+        persist_layout_jsonl=False,
+    )
+    reconciled_levels = [block["level"] for block in reconciled["pages"][0]["blocks"]]
+    assert_true(reconciled_levels == ["H1", "H2", "H4", "H3", "H4"], "全文校正只能将有父级证据的 H2/H3 向下提升一级，不能压浅已有 H4")
+    assert_true(reconciled["heading_reconciliation"]["changed_count"] == 2, "全文校正应只记录高置信升层")
+
+    schema_state = {
+        "pages": [
+            {"page_id": 0, "blocks": [
+                {"id": "s_h1", "block_type": "paragraph_title", "level": "H1", "text": "第一章 总则", "bbox": [40, 10, 400, 40]},
+                {"id": "s_h2", "block_type": "paragraph_title", "level": "H2", "text": "一、总体要求", "bbox": [70, 60, 400, 90]},
+                {"id": "s_1", "block_type": "paragraph_title", "level": "H3", "text": "（一）适用范围", "bbox": [110, 110, 500, 140]},
+                {"id": "s_2", "block_type": "paragraph_title", "level": "H2", "text": "（二）实施原则", "bbox": [110, 160, 500, 190]},
+                {"id": "s_3", "block_type": "paragraph_title", "level": "H3", "text": "（三）管理职责", "bbox": [110, 210, 500, 240]},
+                {"id": "s_4", "block_type": "paragraph_title", "level": "H3", "text": "（四）监督机制", "bbox": [110, 260, 500, 290]},
+            ]}
+        ],
+        "result": {"blocks": []},
+        "warnings": [],
+    }
+    schema_reconciled = reconcile_heading_schema_levels(
+        schema_state,
+        "missing-job-for-unit-test",
+        persist_layout_jsonl=False,
+    )
+    schema_levels = [block["level"] for block in schema_reconciled["pages"][0]["blocks"]]
+    assert_true(schema_levels == ["H1", "H2", "H3", "H3", "H3", "H3"], "连续的局部编号家族应将孤立 H2 修正为 H3")
+    assert_true(schema_reconciled["heading_schema_reconciliation"]["changed_count"] == 1, "局部编号规则只应修正有双证据的孤立项")
+
+    cross_chapter_schema_state = {
+        "pages": [
+            {"page_id": 0, "blocks": [
+                {"id": "chapter_1", "block_type": "paragraph_title", "level": "H1", "text": "第一节 重要提示", "bbox": [40, 10, 400, 40]},
+                {"id": "company_intro", "block_type": "paragraph_title", "level": "H2", "text": "1、公司简介", "bbox": [70, 60, 400, 90]},
+                {"id": "chapter_2", "block_type": "paragraph_title", "level": "H1", "text": "第二节 主营业务", "bbox": [40, 110, 400, 140]},
+                {"id": "business_1", "block_type": "paragraph_title", "level": "H3", "text": "1、火锅调料", "bbox": [110, 160, 500, 190]},
+                {"id": "business_2", "block_type": "paragraph_title", "level": "H3", "text": "2、菜谱式调料", "bbox": [110, 210, 500, 240]},
+                {"id": "business_3", "block_type": "paragraph_title", "level": "H3", "text": "3、香肠腊肉调料", "bbox": [110, 260, 500, 290]},
+            ]}
+        ],
+        "result": {"blocks": []},
+        "warnings": [],
+    }
+    cross_chapter_reconciled = reconcile_heading_schema_levels(
+        cross_chapter_schema_state,
+        "missing-job-for-unit-test",
+        persist_layout_jsonl=False,
+    )
+    cross_chapter_levels = [block["level"] for block in cross_chapter_reconciled["pages"][0]["blocks"]]
+    assert_true(cross_chapter_levels[1] == "H2", "编号样式相同但跨 H1 章节时，不得将正确 H2 降为 H3")
+    assert_true(cross_chapter_reconciled["heading_schema_reconciliation"]["changed_count"] == 0, "跨章节编号不得产生局部结构校正")
+
+    financial_state = {"pages": [{"page_id": 0, "blocks": [
+        {"id": "root", "block_type": "paragraph_title", "level": "H1", "text": "第二节 公司基本情况", "bbox": [600, 10, 900, 40]},
+        {"id": "section", "block_type": "paragraph_title", "level": "H1", "text": "2、报告期公司主要业务简介", "bbox": [220, 60, 700, 90]},
+        {"id": "sub", "block_type": "paragraph_title", "level": "H2", "text": "（一）公司的主营业务", "bbox": [290, 110, 700, 140]},
+        {"id": "item", "block_type": "paragraph_title", "level": "H3", "text": "1、火锅调料", "bbox": [280, 160, 500, 190]},
+    ]}], "result": {"blocks": []}, "warnings": []}
+    financial_reconciled = reconcile_heading_schema_levels(financial_state, "missing-job-for-unit-test", persist_layout_jsonl=False)
+    assert_true([b["level"] for b in financial_reconciled["pages"][0]["blocks"]] == ["H1", "H2", "H3", "H4"], "财报第X节下的连续编号链应逐级恢复")
 
     reset_context = build_heading_context(
         [

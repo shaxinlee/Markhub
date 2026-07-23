@@ -20,6 +20,7 @@ BLOCK_TYPES = {
     "formula",
     "chart",
     "flowchart",
+    "diagram",
     "image",
     "vision_footnote",
     "header",
@@ -50,6 +51,12 @@ ENV_CONFIG_KEYS = [
     "LAYOUT_RENDER_DPI",
     "LAYOUT_MAX_PAGES",
     "LAYOUT_MAX_PDF_BYTES",
+    "LAYOUT_PAGE_CONCURRENCY",
+    "LAYOUT_PAGE_SCHEDULE",
+    "LAYOUT_DOCUMENT_HEADING_RECONCILIATION",
+    "LAYOUT_HEADING_SCHEMA_RECONCILIATION",
+    "LAYOUT_DEEP_HEADING_REVIEW",
+    "LAYOUT_DEEP_HEADING_REVIEW_LIMIT",
     "QWEN_RESIZE_PRESET",
     "QWEN_IMAGE_PROFILE",
     "QWEN_RESIZED_WIDTH",
@@ -69,7 +76,7 @@ RESIZE_PRESETS = {
 }
 
 DEFAULT_PROMPT_TEMPLATE_ID = "default_template_1"
-BUILTIN_LAYOUT_PROMPT_REVISION = "layout_prompt_v20260622_schema_rollback"
+BUILTIN_LAYOUT_PROMPT_REVISION = "layout_prompt_v20260702_visual_boundary_image_diagram_flowchart"
 PROMPT_TEMPLATE_CATEGORIES = {"bounding_box", "polygon", "layout", "keypoints", "text_transcription"}
 PROMPT_TYPES = {
     "data_annotation",
@@ -101,6 +108,7 @@ DATASET_LABEL_TYPES = {
     "formula",
     "seal",
     "flowchart",
+    "diagram",
     "header",
     "footer",
     "caption",
