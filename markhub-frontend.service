@@ -1,0 +1,19 @@
+[Unit]
+Description=Markhub 数据标注平台前端 (Vite/Express, port 3003)
+After=network.target
+Requires=markhub-backend.service
+
+[Service]
+Type=simple
+WorkingDirectory=/home/sdnu_lsx/compliance_review/Markhub/frontend
+Environment=PORT=3003
+Environment=HMR_PORT=20981
+Environment=MARKHUB_BACKEND_URL=http://127.0.0.1:8787
+ExecStart=/home/sdnu_lsx/compliance_review/Markhub/frontend/node_modules/.bin/tsx server.ts
+Restart=always
+RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=10
+
+[Install]
+WantedBy=default.target

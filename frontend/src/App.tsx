@@ -16,6 +16,7 @@ import SecondAnnotationWorkspace from './components/SecondAnnotationWorkspace';
 import BoundingBoxWorkspace from './components/BoundingBoxWorkspace';
 import PromptManagementPage from './components/PromptManagementPage';
 import SettingsPage from './components/SettingsPage';
+import GoldReviewWorkspace from './components/GoldReviewWorkspace';
 
 export default function App() {
   const [activeScreen, setActiveScreen] = useState<'dashboard' | 'workspace' | 'secondAnnotation' | 'boundingBox'>('dashboard');
@@ -229,6 +230,8 @@ export default function App() {
                 onSecondAnnotate={handleOpenSecondAnnotation}
                 onRefreshDatasets={loadRealDatasets}
               />
+            ) : activeHeaderTab === 'goldReview' ? (
+              <GoldReviewWorkspace />
             ) : activeHeaderTab === 'prompts' ? (
               <PromptManagementPage />
             ) : activeHeaderTab === 'settings' ? (

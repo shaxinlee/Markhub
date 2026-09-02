@@ -206,6 +206,7 @@ from .utils import (
 )
 
 from features.bounding_box import register as register_bounding_box
+from features.gold_review import register as register_gold_review
 
 load_dotenv()
 
@@ -604,6 +605,7 @@ def main() -> int:
     ensure_dataset_storage()
     bootstrap_prompt_store()
     register_bounding_box(LayoutAnalyzerHandler)
+    register_gold_review(LayoutAnalyzerHandler)
     server = ThreadingHTTPServer((args.host, args.port), LayoutAnalyzerHandler)
     print(f"Layout Analyzer running at http://{args.host}:{args.port}")
     print(f"LLM_BASE_URL={env_config()['base_url']}")

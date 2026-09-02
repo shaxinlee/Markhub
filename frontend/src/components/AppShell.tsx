@@ -1,11 +1,12 @@
 import React from 'react';
 import { Bell, Search, UserCircle } from 'lucide-react';
 
-export type AppTab = 'projects' | 'datasets' | 'prompts' | 'analytics' | 'team' | 'settings';
+export type AppTab = 'projects' | 'datasets' | 'goldReview' | 'prompts' | 'analytics' | 'team' | 'settings';
 
 const NAV_ITEMS: Array<{ id: AppTab; label: string }> = [
   { id: 'projects', label: '项目' },
   { id: 'datasets', label: '数据集' },
+  { id: 'goldReview', label: '金标准审查' },
   { id: 'prompts', label: '提示词管理' },
   { id: 'analytics', label: '分析' },
   { id: 'team', label: '团队' },
@@ -84,4 +85,3 @@ export default function AppShell({ activeTab, onNavigate, children }: AppShellPr
     </div>
   );
 }
-

@@ -1,0 +1,15 @@
+[Unit]
+Description=Markhub 数据标注平台后端 (Python server)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/sdnu_lsx/compliance_review/Markhub/backend
+ExecStart=/home/sdnu_lsx/compliance_review/Markhub/.venv/bin/python server.py --host 127.0.0.1 --port 8787
+Restart=always
+RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=10
+
+[Install]
+WantedBy=default.target
